@@ -39,11 +39,13 @@ export class DynamicAgent extends BaseAgent {
     Respond STRICTLY in this JSON format (do not use markdown blocks):
     {
       "reflexion": "your internal thoughts (will be hidden from user)",
-      "reponse": "your natural language message to the user",
+      "reponse": "your natural language message to the user/agent",
       "action": {
         "type": "UPDATE_PROJECT_STATE",
         "payload": { "status": "in_progress", "tasks": [] }
-      }
+      } 
+      // OR for calling another agent:
+      // "action": { "type": "CALL_AGENT", "payload": { "agent": "target_agent_name", "message": "your explicit instructions" } }
     }
     IMPORTANT RULES:
     1. NEVER include "> Chain of Thought" or "_UPDATE_PROJECT_STATE" or raw JSON blocks inside the "reponse" field!

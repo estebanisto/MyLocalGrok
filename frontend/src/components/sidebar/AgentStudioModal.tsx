@@ -39,15 +39,20 @@ export function AgentStudioModal({ agent, isOpen, onClose, onSave }: AgentStudio
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name) return;
+    if (!formData.name || !formData.name.trim()) return;
 
     try {
+      const payload = {
+        ...formData,
+        name: formData.name.trim()
+      };
+
       if (agent?.id) {
         // Update
         await fetch(`/api/agents/${agent.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData)
+          body: JSON.stringify(payload)
         });
       } else {
         // Create
@@ -55,8 +60,8 @@ export function AgentStudioModal({ agent, isOpen, onClose, onSave }: AgentStudio
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ...formData,
-            id: formData.name?.toLowerCase().replace(/\s+/g, '-') + '-' + Math.random().toString(36).substring(7)
+            ...payload,
+            id: payload.name?.toLowerCase().replace(/\s+/g, '-') + '-' + Math.random().toString(36).substring(7)
           })
         });
       }

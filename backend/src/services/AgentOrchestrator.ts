@@ -26,7 +26,9 @@ export class AgentOrchestrator extends EventEmitter {
       for (const config of configs) {
         this.agents.set(config.name, new DynamicAgent(config, this.stateService, this.sandbox, this.keyManager));
       }
-      this.emit('agentsUpdated', this.getAgentsConfig());
+      
+      const updatedConfigs = await this.getAgentsConfig();
+      this.emit('agentsUpdated', updatedConfigs);
     } catch (e) {
       console.warn("agentsConfig.json not found or invalid, waiting for creation.");
     }

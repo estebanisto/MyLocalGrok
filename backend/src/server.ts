@@ -4,11 +4,8 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
 
-import { WorkspaceSandbox } from './services/WorkspaceSandbox';
-import { ProjectStateService } from './services/ProjectStateService';
 import { ApiKeyManager } from './services/ApiKeyManager';
-import { AgentOrchestrator } from './services/AgentOrchestrator';
-import { ChatHistoryService } from './services/ChatHistoryService';
+import { ProjectManagerService, ProjectContext } from './services/ProjectManagerService';
 import { createApiRoutes } from './routes/api';
 import { setupChatHandler } from './infrastructure/socket/chatHandler';
 
@@ -21,16 +18,12 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
-const workspaceRoot = path.resolve(__dirname, '../workspace');
-const sandbox = new WorkspaceSandbox(workspaceRoot);
-const stateService = new ProjectStateService(sandbox);
 const keyManager = new ApiKeyManager();
-const historyService = new ChatHistoryService(sandbox);
-const orchestrator = new AgentOrchestrator(stateService, sandbox, keyManager);
+const projectManager = new ProjectManagerService(keyManager);
 
-app.use('/api', createApiRoutes(keyManager, stateService, orchestrator));
+app.use('/api', createApiRoutes(keyManager, projectManager));
 
-setupChatHandler(io, orchestrator, historyService);
+setupChatHandler(io, projectManager);
 
 keyManager.on('alert:keys_exhausted', () => {
   io.emit('alert:keys_exhausted');
@@ -39,12 +32,17 @@ keyManager.on('keysUpdated', (keys) => {
   io.emit('keysUpdated', keys);
 });
 
-stateService.on('stateUpdated', (state) => {
-  io.emit('stateUpdated', state);
-});
-
-orchestrator.on('agentsUpdated', (configs) => {
-  io.emit('agentsUpdated', configs);
+// Broadcast events from the active project context
+projectManager.on('activeProjectChanged', (ctx: ProjectContext) => {
+  io.emit('activeProjectChanged', ctx.id);
+  
+  ctx.stateService.on('stateUpdated', (state) => {
+    io.emit('stateUpdated', state);
+  });
+  
+  ctx.orchestrator.on('agentsUpdated', (configs) => {
+    io.emit('agentsUpdated', configs);
+  });
 });
 
 const PORT = process.env.PORT || 3001;
