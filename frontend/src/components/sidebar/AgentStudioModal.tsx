@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 export interface AgentConfig {
   id: string;
@@ -30,7 +31,8 @@ export function AgentStudioModal({ agent, isOpen, onClose, onSave }: AgentStudio
         name: '',
         role: '',
         systemPrompt: '',
-        themeColor: 'indigo'
+        themeColor: 'indigo',
+        model: 'gemini-3.5-flash'
       });
     }
   }, [agent, isOpen]);
@@ -109,6 +111,21 @@ export function AgentStudioModal({ agent, isOpen, onClose, onSave }: AgentStudio
               className="bg-slate-800 border-slate-700 focus-visible:ring-indigo-500"
               placeholder="ex: indigo, emerald, rose"
             />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-slate-300">Modèle Gemini</label>
+            <Select 
+              value={formData.model || 'gemini-3.5-flash'} 
+              onValueChange={value => setFormData({ ...formData, model: value })}
+            >
+              <SelectTrigger className="bg-slate-800 border-slate-700 focus:ring-indigo-500">
+                <SelectValue placeholder="Choisir un modèle" />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-800 border-slate-700 text-slate-200">
+                <SelectItem value="gemini-3.5-flash">Flash 3.5 - Standard</SelectItem>
+                <SelectItem value="gemini-3.7-flash">Flash 3.7 - Avancé</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <DialogFooter className="mt-6">
             <Button type="button" variant="ghost" onClick={onClose} className="hover:bg-slate-800 hover:text-white">Annuler</Button>

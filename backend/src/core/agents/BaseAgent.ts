@@ -2,7 +2,7 @@ import { AgentChainOfThought } from './AgentTypes';
 import { ProjectStateService } from '../../services/ProjectStateService';
 import { WorkspaceSandbox } from '../../services/WorkspaceSandbox';
 import { ApiKeyManager } from '../../services/ApiKeyManager';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export abstract class BaseAgent {
   protected name: string;
@@ -11,6 +11,7 @@ export abstract class BaseAgent {
   constructor(
     name: string,
     roleDescription: string,
+    protected model: string = 'gemini-1.5-flash-001',
     protected stateService: ProjectStateService,
     protected sandbox: WorkspaceSandbox,
     protected keyManager: ApiKeyManager
@@ -30,16 +31,14 @@ export abstract class BaseAgent {
     }
 
     try {
-      const ai = new GoogleGenAI({ apiKey: key });
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          systemInstruction,
-          responseMimeType: "application/json"
-        }
+      console.log("Appel du modèle :", this.model);
+      const genAI = new GoogleGenerativeAI(key);
+      const generativeModel = genAI.getGenerativeModel({ 
+        model: this.model,
+        systemInstruction: systemInstruction 
       });
-      return response.text || '{}';
+      const response = await generativeModel.generateContent(prompt);
+      return response.response.text() || '{}';
     } catch (error: any) {
       if (error.status === 429) {
         this.keyManager.reportError(key, 429);
