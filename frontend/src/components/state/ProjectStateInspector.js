@@ -1,0 +1,5 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { X, Code2 } from 'lucide-react';
+export function ProjectStateInspector({ projectState, onClose }) {
+    return (_jsxs("aside", { className: "w-96 bg-slate-900 border-l border-slate-800 flex flex-col h-full shrink-0 animate-in slide-in-from-right-8 duration-300 shadow-2xl z-20 absolute right-0 top-0 bottom-0", children: [_jsxs("div", { className: "p-4 border-b border-slate-800 flex justify-between items-center bg-slate-800/30", children: [_jsxs("h2", { className: "font-semibold flex items-center gap-2 text-slate-200", children: [_jsx(Code2, { size: 18, className: "text-cyan-400" }), "\u00C9tat du Projet JSON"] }), _jsx("button", { onClick: onClose, className: "p-1.5 hover:bg-slate-700 rounded-md text-slate-400 hover:text-slate-200 transition-colors", children: _jsx(X, { size: 18 }) })] }), _jsx("div", { className: "flex-1 overflow-auto p-4 bg-[#0d1117]", children: _jsx("pre", { className: "text-xs text-slate-300 font-mono w-full break-all whitespace-pre-wrap", children: JSON.stringify(projectState, null, 2) }) })] }));
+}

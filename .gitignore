@@ -1,0 +1,19 @@
+node_modules/
+dist/
+build/
+.env
+
+# Workspace data
+backend/workspace/projectState.json
+backend/workspace/agentsConfig.json
+backend/workspace/chatHistory.json
+backend/workspace/.archives/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
