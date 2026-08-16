@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { AgentStatus } from '../../App';
 import { Users, LayoutList, Zap, Settings, Plus } from 'lucide-react';
-import { AgentConfig, AgentStudioModal } from './AgentStudioModal';
+import { AgentStudioModal } from './AgentStudioModal';
+import type { AgentConfig } from './AgentStudioModal';
 
 interface SidebarProps {
   agentsStatus: AgentStatus[];
