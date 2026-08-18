@@ -11,8 +11,11 @@ import db from '../infrastructure/db/Database';
 export interface ProjectInfo {
   id: string;
   name: string;
+  description?: string;
   owner_id: string;
   createdAt: string;
+  thumbnail_url?: string;
+  assignedUsers?: { id: string; username: string; role: string }[];
 }
 
 export interface ProjectContext {
@@ -62,16 +65,31 @@ export class ProjectManagerService extends EventEmitter {
   }
 
   public getProjectsForUser(userId: string, role: string): ProjectInfo[] {
+    let projects: ProjectInfo[] = [];
     if (role === 'admin') {
-      return db.prepare('SELECT * FROM projects').all() as ProjectInfo[];
+      projects = db.prepare('SELECT * FROM projects').all() as ProjectInfo[];
     } else {
-      return db.prepare(`
+      projects = db.prepare(`
         SELECT p.* FROM projects p
         LEFT JOIN project_assignments pa ON p.id = pa.project_id
         WHERE p.owner_id = ? OR pa.user_id = ?
         GROUP BY p.id
       `).all(userId, userId) as ProjectInfo[];
     }
+
+    const allAssignments = db.prepare(`
+      SELECT pa.project_id, u.id, u.username, u.role
+      FROM project_assignments pa
+      JOIN users u ON pa.user_id = u.id
+    `).all() as any[];
+
+    for (const p of projects) {
+      p.assignedUsers = allAssignments
+        .filter(a => a.project_id === p.id)
+        .map(a => ({ id: a.id, username: a.username, role: a.role }));
+    }
+
+    return projects;
   }
 
   public deleteProject(id: string, userId: string, role: string): void {
@@ -96,16 +114,16 @@ export class ProjectManagerService extends EventEmitter {
     this.emit('projectsUpdated');
   }
 
-  public createProject(name: string, owner_id: string): ProjectInfo {
+  public createProject(name: string, description: string | undefined, owner_id: string): ProjectInfo {
     const id = Math.random().toString(36).substring(7) + '-' + Date.now().toString(36);
     const createdAt = new Date().toISOString();
     
     db.transaction(() => {
-      db.prepare('INSERT INTO projects (id, name, owner_id, createdAt) VALUES (?, ?, ?, ?)').run(id, name, owner_id, createdAt);
+      db.prepare('INSERT INTO projects (id, name, description, owner_id, createdAt) VALUES (?, ?, ?, ?, ?)').run(id, name, description || null, owner_id, createdAt);
       db.prepare('INSERT INTO project_assignments (project_id, user_id) VALUES (?, ?)').run(id, owner_id);
     })();
 
-    const newProject = { id, name, owner_id, createdAt };
+    const newProject: ProjectInfo = { id, name, description: description || undefined, owner_id, createdAt };
 
     // Create the project folder
     const projectDir = path.join(this.rootWorkspaceDir, id);
@@ -212,6 +230,48 @@ export class ProjectManagerService extends EventEmitter {
     }
 
     db.prepare('DELETE FROM project_assignments WHERE project_id = ? AND user_id = ?').run(projectId, targetUserId);
+    this.emit('projectsUpdated');
+  }
+
+  public updateProjectThumbnail(projectId: string, url: string): void {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectInfo;
+    if (!project) throw new Error('Project not found');
+    db.prepare('UPDATE projects SET thumbnail_url = ? WHERE id = ?').run(url, projectId);
+    this.emit('projectsUpdated');
+  }
+
+  public updateProject(
+    projectId: string, 
+    name: string, 
+    description: string | undefined, 
+    assignedUserIds: string[], 
+    updaterId: string, 
+    updaterRole: string
+  ): void {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectInfo;
+    if (!project) throw new Error('Project not found');
+
+    if (updaterRole !== 'admin' && project.owner_id !== updaterId) {
+      throw new Error('Only the project owner or an admin can edit the project details');
+    }
+
+    db.transaction(() => {
+      // Update basic info
+      db.prepare('UPDATE projects SET name = ?, description = ? WHERE id = ?').run(name, description || null, projectId);
+      
+      // Update assignments (we keep the owner as always assigned or implicitly assigned, but let's just clear and set)
+      db.prepare('DELETE FROM project_assignments WHERE project_id = ?').run(projectId);
+      
+      const insertStmt = db.prepare('INSERT INTO project_assignments (project_id, user_id) VALUES (?, ?)');
+      // Make sure owner is always assigned
+      const usersToAssign = new Set(assignedUserIds);
+      usersToAssign.add(project.owner_id);
+      
+      for (const uid of usersToAssign) {
+        insertStmt.run(projectId, uid);
+      }
+    })();
+    
     this.emit('projectsUpdated');
   }
 }

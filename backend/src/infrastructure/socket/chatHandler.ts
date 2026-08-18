@@ -121,7 +121,7 @@ export function setupChatHandler(io: Server, projectManager: ProjectManagerServi
 
   const broadcastSupervision = () => {
     const connections = Array.from(activeConnections.values());
-    io.to('admin_supervision').emit('supervision_update', connections);
+    io.emit('supervision_update', connections);
   };
 
   io.on('connection', async (socket: Socket) => {
@@ -138,8 +138,8 @@ export function setupChatHandler(io: Server, projectManager: ProjectManagerServi
 
     if (user.role === 'admin' || user.role === 'team_lead') {
       socket.join('admin_supervision');
-      socket.emit('supervision_update', Array.from(activeConnections.values()));
     }
+    socket.emit('supervision_update', Array.from(activeConnections.values()));
     broadcastSupervision();
 
     socket.on('join_project', (projectId: string) => {

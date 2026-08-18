@@ -3,6 +3,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 
 import { ApiKeyManager } from './services/ApiKeyManager';
 import { ProjectManagerService, ProjectContext } from './services/ProjectManagerService';
@@ -18,6 +19,12 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(process.cwd(), 'workspace', 'uploads')));
+
+const uploadsDir = path.join(process.cwd(), 'workspace', 'uploads', 'thumbnails');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
 const keyManager = new ApiKeyManager();
 const projectManager = new ProjectManagerService(keyManager);

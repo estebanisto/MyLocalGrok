@@ -2,14 +2,17 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
-import { Users, Folder, Settings, UserPlus, Edit2, Trash2, Save, X, Plus, LogOut, Code2, Activity, Download } from 'lucide-react';
+import { Users, Folder, Settings, UserPlus, Edit2, Trash2, Save, X, Plus, LogOut, Code2, Activity, Download, Image as ImageIcon, Search } from 'lucide-react';
 import { ApiKeySettingsModal } from '../components/settings/ApiKeySettingsModal';
 
 interface ProjectInfo {
   id: string;
   name: string;
+  description?: string;
   owner_id: string;
   createdAt: string;
+  thumbnail_url?: string;
+  assignedUsers?: { id: string; username: string; role: string }[];
 }
 
 export function Dashboard() {
@@ -22,22 +25,30 @@ export function Dashboard() {
   const [activeConnections, setActiveConnections] = useState<any[]>([]);
 
   useEffect(() => {
-    if (user?.role === 'admin' && socket) {
-      socket.emit('join_admin_supervision');
-      socket.on('active_connections', (connections) => {
+    if (socket) {
+      if (user?.role === 'admin' || user?.role === 'team_lead') {
+        // We might not need this emit if the backend already joins on connection, but let's keep it safe
+        socket.emit('join_admin_supervision');
+      }
+      socket.on('supervision_update', (connections) => {
         setActiveConnections(connections);
       });
       return () => {
-        socket.off('active_connections');
+        socket.off('supervision_update');
       };
     }
   }, [user, socket]);
   
   // Projects State
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectDesc, setNewProjectDesc] = useState('');
+  const [newProjectUsers, setNewProjectUsers] = useState<string[]>([]);
+  const [newProjectThumbnail, setNewProjectThumbnail] = useState<File | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
-
+  const [isEditingProject, setIsEditingProject] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   // Users State
   const [users, setUsers] = useState<any[]>([]);
   const [newUsername, setNewUsername] = useState('');
@@ -82,24 +93,80 @@ export function Dashboard() {
     if (!newProjectName.trim()) return;
 
     try {
+      const formData = new FormData();
+      formData.append('name', newProjectName);
+      if (newProjectDesc) formData.append('description', newProjectDesc);
+      if (newProjectUsers.length > 0) formData.append('assignedUsers', JSON.stringify(newProjectUsers));
+      if (newProjectThumbnail) formData.append('thumbnail', newProjectThumbnail);
+
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ name: newProjectName })
+        body: formData
       });
       if (res.ok) {
         setIsCreatingProject(false);
         setNewProjectName('');
+        setNewProjectDesc('');
+        setNewProjectUsers([]);
+        setNewProjectThumbnail(null);
         fetchProjects();
+      } else {
+        const error = await res.json();
+        alert(`Erreur: ${error.error}`);
       }
     } catch (e) {
       console.error(e);
+      alert("Erreur lors de la création du projet.");
     }
   };
+  const handleOpenEditModal = (p: ProjectInfo, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setNewProjectName(p.name);
+    setNewProjectDesc(p.description || '');
+    setNewProjectUsers(p.assignedUsers?.map(u => u.id) || []);
+    setNewProjectThumbnail(null);
+    setEditingProjectId(p.id);
+    setIsEditingProject(true);
+  };
 
+  const handleEditProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProjectName.trim() || !editingProjectId) return;
+
+    try {
+      const formData = new FormData();
+      formData.append('name', newProjectName);
+      if (newProjectDesc) formData.append('description', newProjectDesc);
+      formData.append('assignedUsers', JSON.stringify(newProjectUsers));
+      if (newProjectThumbnail) formData.append('thumbnail', newProjectThumbnail);
+
+      const res = await fetch(`/api/projects/${editingProjectId}`, {
+        method: 'PUT',
+        headers: { 
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: formData
+      });
+      if (res.ok) {
+        setIsEditingProject(false);
+        setEditingProjectId(null);
+        setNewProjectName('');
+        setNewProjectDesc('');
+        setNewProjectUsers([]);
+        setNewProjectThumbnail(null);
+        fetchProjects();
+      } else {
+        const error = await res.json();
+        alert(`Erreur: ${error.error}`);
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Erreur lors de la modification du projet.");
+    }
+  };
   const selectProject = async (id: string) => {
     try {
       await fetch(`/api/projects/${id}/active`, { 
@@ -136,6 +203,31 @@ export function Dashboard() {
       console.error(err);
       alert("Impossible de télécharger le projet.");
     });
+  };
+
+  const handleUploadThumbnail = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const formData = new FormData();
+    formData.append('thumbnail', file);
+
+    try {
+      const res = await fetch(`/api/projects/${id}/thumbnail`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+        body: formData
+      });
+      if (res.ok) {
+        fetchProjects(); // Rafraichir les images
+      } else {
+        const error = await res.json();
+        alert(`Erreur: ${error.error}`);
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Erreur lors de l'upload de l'image.");
+    }
   };
 
   const handleDeleteProject = async (id: string, e: React.MouseEvent) => {
@@ -261,6 +353,37 @@ export function Dashboard() {
   };
 
   const canCreateProject = user?.role === 'admin' || user?.role === 'team_lead';
+  
+  const filteredProjects = projects.filter(p => 
+    p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    p.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const getInitials = (name: string) => {
+    const parts = name.trim().split(/[\s-._]+/);
+    if (parts.length >= 2) {
+      return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  };
+
+  const getRoleColor = (role: string) => {
+    switch(role) {
+      case 'admin': return 'bg-rose-500 text-white';
+      case 'team_lead': return 'bg-amber-500 text-amber-950';
+      default: return 'bg-emerald-500 text-white';
+    }
+  };
+
+  const uniqueConnections: any[] = [];
+  activeConnections.forEach(conn => {
+    const existing = uniqueConnections.find(u => u.userId === conn.userId);
+    if (!existing) {
+      uniqueConnections.push({ ...conn });
+    } else if (conn.projectId && !existing.projectId) {
+      existing.projectId = conn.projectId;
+    }
+  });
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-900 text-slate-200 font-sans">
@@ -364,7 +487,7 @@ export function Dashboard() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700">
                   <h3 className="text-slate-400 text-sm font-medium mb-1">Utilisateurs en ligne</h3>
-                  <p className="text-3xl font-bold text-white">{activeConnections.length}</p>
+                  <p className="text-3xl font-bold text-white">{uniqueConnections.length}</p>
                 </div>
                 <div className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700">
                   <h3 className="text-slate-400 text-sm font-medium mb-1">Total Projets</h3>
@@ -389,11 +512,20 @@ export function Dashboard() {
                       <div 
                         key={p.id}
                         onClick={() => navigate(`/workspace/${p.id}`)}
-                        className="bg-slate-700/30 hover:bg-slate-700/60 border border-slate-600/50 rounded-xl p-4 cursor-pointer transition-colors flex flex-col justify-between"
+                        className="bg-slate-700/30 hover:bg-slate-700/60 border border-slate-600/50 rounded-xl overflow-hidden cursor-pointer transition-colors flex flex-col"
                       >
-                        <div className="font-medium text-slate-200 truncate mb-2" title={p.name}>{p.name}</div>
-                        <div className="text-xs text-slate-400 flex items-center justify-between">
-                          <span>Créé le {new Date(p.createdAt).toLocaleDateString()}</span>
+                        <div className="h-20 w-full bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center border-b border-slate-600/50">
+                          {p.thumbnail_url ? (
+                            <img src={`http://localhost:3001${p.thumbnail_url}`} alt={p.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <Code2 className="text-slate-500/50" size={32} />
+                          )}
+                        </div>
+                        <div className="p-3 flex-1 flex flex-col justify-between">
+                          <div className="font-medium text-slate-200 truncate mb-1" title={p.name}>{p.name}</div>
+                          <div className="text-[10px] text-slate-400">
+                            Créé le {new Date(p.createdAt).toLocaleDateString()}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -409,17 +541,17 @@ export function Dashboard() {
                   </h3>
                 </div>
                 <div className="p-6 max-h-[400px] overflow-y-auto custom-scrollbar">
-                  {activeConnections.length === 0 ? (
+                  {uniqueConnections.length === 0 ? (
                     <div className="text-center text-slate-500 py-4">Aucun utilisateur actuellement en ligne.</div>
                   ) : (
                     <div className="relative border-l border-slate-700 ml-3 md:ml-0 md:border-l-0">
                       <div className="md:absolute md:inset-y-0 md:left-1/2 md:-ml-px md:w-px md:bg-slate-700"></div>
                       <div className="space-y-6">
-                        {activeConnections.map((conn, index) => {
+                        {uniqueConnections.map((conn, index) => {
                           const activeProject = projects.find(p => p.id === conn.projectId);
                           const isEven = index % 2 === 0;
                           return (
-                            <div key={conn.socketId} className={`relative flex items-center md:justify-between w-full ${isEven ? 'md:flex-row-reverse' : ''}`}>
+                            <div key={conn.userId} className={`relative flex items-center md:justify-between w-full ${isEven ? 'md:flex-row-reverse' : ''}`}>
                               {/* Connector dot */}
                               <div className="absolute left-[-5px] md:left-1/2 md:-ml-1.5 w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-slate-800/50 animate-pulse z-10"></div>
                               
@@ -462,58 +594,30 @@ export function Dashboard() {
                   <p className="text-slate-400">Sélectionnez un projet pour accéder à l'espace de travail.</p>
                 </div>
                 
-                {canCreateProject && !isCreatingProject && (
-                  <button
-                    onClick={() => setIsCreatingProject(true)}
-                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-5 py-2.5 rounded-xl transition-all font-medium shadow-lg shadow-indigo-500/20"
-                  >
-                    <Plus size={20} />
-                    Nouveau Projet
-                  </button>
-                )}
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                    <input
+                      type="text"
+                      placeholder="Rechercher un projet..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="bg-slate-800/50 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-64 transition-all"
+                    />
+                  </div>
+                  {canCreateProject && !isCreatingProject && (
+                    <button
+                      onClick={() => setIsCreatingProject(true)}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-5 py-2.5 rounded-xl transition-all font-medium shadow-lg shadow-indigo-500/20 shrink-0"
+                    >
+                      <Plus size={20} />
+                      Nouveau Projet
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {isCreatingProject && canCreateProject && (
-                <div className="bg-slate-800/50 p-8 rounded-2xl border border-slate-700 shadow-xl max-w-2xl mb-8 animate-in fade-in slide-in-from-top-4 duration-300">
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-semibold text-white">Créer un projet</h3>
-                    <button onClick={() => setIsCreatingProject(false)} className="text-slate-400 hover:text-white transition-colors">
-                      <X size={20} />
-                    </button>
-                  </div>
-                  <form onSubmit={handleCreateProject} className="space-y-6">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-400 mb-2">Nom du projet</label>
-                      <input
-                        type="text"
-                        autoFocus
-                        value={newProjectName}
-                        onChange={e => setNewProjectName(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                        placeholder="Ex: Refonte du site web..."
-                      />
-                    </div>
-                    <div className="flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setIsCreatingProject(false)}
-                        className="px-6 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-colors font-medium"
-                      >
-                        Annuler
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={!newProjectName.trim()}
-                        className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"
-                      >
-                        Créer
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              )}
-
-              {projects.length === 0 && !isCreatingProject ? (
+              {filteredProjects.length === 0 ? (
                 <div className="text-center py-20 bg-slate-800/20 rounded-3xl border border-slate-800 border-dashed">
                   <Folder className="mx-auto text-slate-600 mb-4" size={48} />
                   <h3 className="text-xl font-medium text-slate-300 mb-2">Aucun projet disponible</h3>
@@ -525,42 +629,84 @@ export function Dashboard() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {projects.map(p => (
+                  {filteredProjects.map(p => (
                     <div 
                       key={p.id} 
                       onClick={() => selectProject(p.id)}
-                      className="group relative bg-slate-800/40 hover:bg-slate-800 rounded-2xl border border-slate-700 hover:border-indigo-500/50 p-6 cursor-pointer transition-all hover:shadow-xl hover:shadow-indigo-500/10 flex flex-col h-48"
+                      className="group relative bg-slate-800/40 hover:bg-slate-800 rounded-2xl border border-slate-700 hover:border-indigo-500/50 cursor-pointer transition-all hover:shadow-xl hover:shadow-indigo-500/10 flex flex-col min-h-[16rem] overflow-hidden"
                     >
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="bg-indigo-500/10 p-3 rounded-xl group-hover:bg-indigo-500/20 transition-colors">
-                          <Folder className="text-indigo-400" size={28} />
-                        </div>
+                      <div className="h-32 w-full relative bg-gradient-to-br from-slate-800 to-slate-900 border-b border-slate-700/50 flex items-center justify-center">
+                        {p.thumbnail_url ? (
+                          <img src={`http://localhost:3001${p.thumbnail_url}`} alt={p.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Code2 className="text-slate-700/50" size={48} />
+                        )}
+                        
                         {canCreateProject && (
-                          <div className="flex items-center gap-1">
+                          <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/80 backdrop-blur-sm p-1.5 rounded-xl border border-slate-700">
+                            <button 
+                              onClick={(e) => handleOpenEditModal(p, e)}
+                              className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/20 rounded-lg transition-colors"
+                              title="Modifier le projet"
+                            >
+                              <Settings size={16} />
+                            </button>
                             <button 
                               onClick={(e) => handleDownloadProject(p.id, e)}
-                              className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                              className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/20 rounded-lg transition-colors"
                               title="Télécharger le projet (ZIP)"
                             >
-                              <Download size={18} />
+                              <Download size={16} />
                             </button>
                             <button 
                               onClick={(e) => handleDeleteProject(p.id, e)}
-                              className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 rounded-lg transition-colors"
                               title="Supprimer le projet"
                             >
-                              <Trash2 size={18} />
+                              <Trash2 size={16} />
                             </button>
                           </div>
                         )}
                       </div>
                       
-                      <h3 className="text-lg font-semibold text-slate-200 group-hover:text-white mb-1 truncate">
-                        {p.name}
-                      </h3>
-                      
-                      <div className="mt-auto flex items-center justify-between text-sm text-slate-500">
-                        <span>Créé le {new Date(p.createdAt).toLocaleDateString()}</span>
+                      <div className="p-5 flex flex-col flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-lg font-semibold text-slate-200 group-hover:text-white truncate">
+                            {p.name}
+                          </h3>
+                        </div>
+                        
+                        {p.description && (
+                          <p className="text-sm text-slate-400 line-clamp-2 mb-4 leading-relaxed">
+                            {p.description}
+                          </p>
+                        )}
+                        
+                        <div className="mt-auto pt-4 flex flex-col gap-3 border-t border-slate-700/50">
+                          {p.assignedUsers && p.assignedUsers.filter(u => u.role !== 'admin').length > 0 && (
+                            <div className="flex items-center pl-2">
+                              {[...p.assignedUsers].filter(u => u.role !== 'admin').sort((a, b) => {
+                                const ranks: Record<string, number> = { admin: 1, team_lead: 2, employee: 3 };
+                                return (ranks[a.role] || 4) - (ranks[b.role] || 4);
+                              }).map(u => {
+                                const isOnline = activeConnections.some(conn => conn.userId === u.id && conn.projectId === p.id);
+                                return (
+                                  <div 
+                                    key={u.id} 
+                                    className={`relative flex items-center justify-center w-8 h-8 rounded-full border-2 border-slate-800 ${getRoleColor(u.role)} font-medium text-xs -ml-2 hover:z-10 transition-transform hover:scale-110`}
+                                    title={`${u.username} (${u.role})`}
+                                  >
+                                    {getInitials(u.username)}
+                                    <div className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-slate-800 ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between text-xs text-slate-500">
+                            <span>Créé le {new Date(p.createdAt).toLocaleDateString()}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -789,7 +935,243 @@ export function Dashboard() {
               <ApiKeySettingsModal onClose={() => {}} inline={true} />
             </div>
           )}
+
+          {/* Create Project Modal */}
+          {isCreatingProject && (user?.role === 'admin' || user?.role === 'team_lead') && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-800 rounded-3xl border border-slate-700 shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+                <div className="flex justify-between items-center p-6 border-b border-slate-700 bg-slate-800/50">
+                  <h3 className="text-xl font-semibold text-white">Créer un nouveau projet</h3>
+                  <button onClick={() => setIsCreatingProject(false)} className="text-slate-400 hover:text-white transition-colors bg-slate-700/50 hover:bg-slate-700 p-2 rounded-full">
+                    <X size={20} />
+                  </button>
+                </div>
+                
+                <form onSubmit={handleCreateProject} className="p-6 overflow-y-auto max-h-[70vh] custom-scrollbar space-y-6">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1.5">Nom du projet *</label>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={newProjectName}
+                        onChange={e => setNewProjectName(e.target.value)}
+                        className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                        placeholder="Ex: Refonte du site web..."
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1.5">Description</label>
+                      <textarea
+                        value={newProjectDesc}
+                        onChange={e => setNewProjectDesc(e.target.value)}
+                        className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[100px]"
+                        placeholder="Courte description du projet..."
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1.5">Image de couverture</label>
+                      <div className="flex items-center gap-4">
+                        <label className="cursor-pointer bg-slate-900/50 border border-slate-700 border-dashed hover:border-indigo-500 hover:bg-indigo-500/5 rounded-xl p-4 flex-1 flex flex-col items-center justify-center transition-all">
+                          <ImageIcon className="text-slate-400 mb-2" size={24} />
+                          <span className="text-sm text-slate-400">Cliquez pour choisir une image</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={e => setNewProjectThumbnail(e.target.files?.[0] || null)}
+                          />
+                        </label>
+                        {newProjectThumbnail && (
+                          <div className="w-24 h-24 rounded-xl overflow-hidden border border-slate-700 shrink-0 relative group">
+                            <img src={URL.createObjectURL(newProjectThumbnail)} alt="Preview" className="w-full h-full object-cover" />
+                            <button 
+                              type="button"
+                              onClick={() => setNewProjectThumbnail(null)}
+                              className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <X className="text-white" size={24} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {(user?.role === 'admin' || user?.role === 'team_lead') && (
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1.5">Assigner des membres (Optionnel)</label>
+                        <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 max-h-48 overflow-y-auto custom-scrollbar">
+                          {users.filter(u => u.id !== user.id).length === 0 ? (
+                            <div className="text-slate-500 text-sm italic text-center py-2">Aucun autre utilisateur disponible</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {users.filter(u => u.id !== user.id).map(u => (
+                                <label key={u.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-800/50 cursor-pointer transition-colors">
+                                  <input 
+                                    type="checkbox" 
+                                    className="rounded border-slate-600 text-indigo-600 focus:ring-indigo-500 bg-slate-900"
+                                    checked={newProjectUsers.includes(u.id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setNewProjectUsers([...newProjectUsers, u.id]);
+                                      } else {
+                                        setNewProjectUsers(newProjectUsers.filter(id => id !== u.id));
+                                      }
+                                    }}
+                                  />
+                                  <span className="text-slate-200">{u.username}</span>
+                                  <span className="text-xs text-slate-500 uppercase tracking-wider">{u.role}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingProject(false)}
+                      className="px-6 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-colors font-medium"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!newProjectName.trim()}
+                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"
+                    >
+                      Créer le projet
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
+        
+        {/* Edit Project Modal */}
+        {isEditingProject && (user?.role === 'admin' || user?.role === 'team_lead') && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-800 rounded-3xl border border-slate-700 shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+              <div className="flex justify-between items-center p-6 border-b border-slate-700 bg-slate-800/50">
+                <h3 className="text-xl font-semibold text-white">Modifier le projet</h3>
+                <button onClick={() => setIsEditingProject(false)} className="text-slate-400 hover:text-white transition-colors bg-slate-700/50 hover:bg-slate-700 p-2 rounded-full">
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <form onSubmit={handleEditProject} className="p-6 overflow-y-auto max-h-[70vh] custom-scrollbar space-y-6">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1.5">Nom du projet *</label>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={newProjectName}
+                      onChange={e => setNewProjectName(e.target.value)}
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                      placeholder="Ex: Refonte du site web..."
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1.5">Description</label>
+                    <textarea
+                      value={newProjectDesc}
+                      onChange={e => setNewProjectDesc(e.target.value)}
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all min-h-[100px]"
+                      placeholder="Courte description du projet..."
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1.5">Image de couverture</label>
+                    <div className="flex items-center gap-4">
+                      <label className="cursor-pointer bg-slate-900/50 border border-slate-700 border-dashed hover:border-indigo-500 hover:bg-indigo-500/5 rounded-xl p-4 flex-1 flex flex-col items-center justify-center transition-all">
+                        <ImageIcon className="text-slate-400 mb-2" size={24} />
+                        <span className="text-sm text-slate-400">Cliquez pour modifier l'image</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={e => setNewProjectThumbnail(e.target.files?.[0] || null)}
+                        />
+                      </label>
+                      {newProjectThumbnail && (
+                        <div className="w-24 h-24 rounded-xl overflow-hidden border border-slate-700 shrink-0 relative group">
+                          <img src={URL.createObjectURL(newProjectThumbnail)} alt="Preview" className="w-full h-full object-cover" />
+                          <button 
+                            type="button"
+                            onClick={() => setNewProjectThumbnail(null)}
+                            className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="text-white" size={24} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {(user?.role === 'admin' || user?.role === 'team_lead') && (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1.5">Membres assignés</label>
+                      <div className="bg-slate-900/50 border border-slate-700 rounded-xl p-4 max-h-48 overflow-y-auto custom-scrollbar">
+                        {users.filter(u => u.id !== user.id).length === 0 ? (
+                          <div className="text-slate-500 text-sm italic text-center py-2">Aucun autre utilisateur disponible</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {users.filter(u => u.id !== user.id).map(u => (
+                              <label key={u.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-800/50 cursor-pointer transition-colors">
+                                <input 
+                                  type="checkbox" 
+                                  className="rounded border-slate-600 text-indigo-600 focus:ring-indigo-500 bg-slate-900"
+                                  checked={newProjectUsers.includes(u.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setNewProjectUsers([...newProjectUsers, u.id]);
+                                    } else {
+                                      setNewProjectUsers(newProjectUsers.filter(id => id !== u.id));
+                                    }
+                                  }}
+                                />
+                                <span className="text-slate-200">{u.username}</span>
+                                <span className="text-xs text-slate-500 uppercase tracking-wider">{u.role}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingProject(false)}
+                    className="px-6 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl transition-colors font-medium"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!newProjectName.trim()}
+                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"
+                  >
+                    Sauvegarder
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

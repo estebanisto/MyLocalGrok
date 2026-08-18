@@ -3,8 +3,13 @@ import path from 'path';
 import fs from 'fs';
 
 const workspaceDir = path.resolve(process.cwd(), 'workspace');
+const uploadsDir = path.join(workspaceDir, 'uploads', 'thumbnails');
+
 if (!fs.existsSync(workspaceDir)) {
   fs.mkdirSync(workspaceDir, { recursive: true });
+}
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
 const dbPath = path.join(workspaceDir, 'database.sqlite');
@@ -26,8 +31,10 @@ const initDB = () => {
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      description TEXT,
       owner_id TEXT NOT NULL,
       createdAt TEXT NOT NULL,
+      thumbnail_url TEXT,
       FOREIGN KEY (owner_id) REFERENCES users(id)
     );
 
@@ -39,6 +46,23 @@ const initDB = () => {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
+
+  // Migration: Add thumbnail_url if it doesn't exist
+  try {
+    const tableInfo = db.prepare("PRAGMA table_info(projects)").all() as any[];
+    const hasThumbnailUrl = tableInfo.some(col => col.name === 'thumbnail_url');
+    if (!hasThumbnailUrl) {
+      db.exec("ALTER TABLE projects ADD COLUMN thumbnail_url TEXT;");
+      console.log("Migration: Added thumbnail_url column to projects table.");
+    }
+    const hasDescription = tableInfo.some(col => col.name === 'description');
+    if (!hasDescription) {
+      db.exec("ALTER TABLE projects ADD COLUMN description TEXT;");
+      console.log("Migration: Added description column to projects table.");
+    }
+  } catch (err) {
+    console.error("Migration error:", err);
+  }
 };
 
 initDB();

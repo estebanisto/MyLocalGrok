@@ -4,7 +4,19 @@ import { ProjectManagerService } from '../services/ProjectManagerService';
 import { authMiddleware, AuthRequest } from '../middlewares/authMiddleware';
 import * as fs from 'fs';
 import * as path from 'path';
+import multer from 'multer';
 const archiver = require('archiver');
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(process.cwd(), 'workspace', 'uploads', 'thumbnails'));
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${req.params.id}-${Date.now()}${ext}`);
+  }
+});
+const upload = multer({ storage });
 
 export function createApiRoutes(
   keyManager: ApiKeyManager, 
@@ -41,8 +53,8 @@ export function createApiRoutes(
     res.json(projectManager.getProjectsForUser(userId, role));
   });
 
-  router.post('/projects', (req: AuthRequest, res: Response) => {
-    const { name } = req.body;
+  router.post('/projects', upload.single('thumbnail'), (req: AuthRequest, res: Response) => {
+    const { name, description, assignedUsers } = req.body;
     const userId = req.user!.id;
     const role = req.user!.role;
     
@@ -53,8 +65,62 @@ export function createApiRoutes(
     if (!name) return res.status(400).json({ error: 'Name is required' });
     
     try {
-      const project = projectManager.createProject(name, userId);
+      const project = projectManager.createProject(name, description, userId);
+      
+      // If there's an image, set it
+      if (req.file) {
+        const fileUrl = `/uploads/thumbnails/${req.file.filename}`;
+        projectManager.updateProjectThumbnail(project.id, fileUrl);
+        project.thumbnail_url = fileUrl;
+      }
+      
+      // Assign additional users
+      if (assignedUsers) {
+        try {
+          const userIds: string[] = JSON.parse(assignedUsers);
+          userIds.forEach(uid => {
+            if (uid !== userId) {
+              projectManager.assignUserToProject(project.id, uid, userId, role);
+            }
+          });
+        } catch(e) {
+          console.error("Failed to assign users during creation", e);
+        }
+      }
+
       res.status(201).json(project);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.put('/projects/:id', upload.single('thumbnail'), (req: AuthRequest, res: Response) => {
+    const { name, description, assignedUsers } = req.body;
+    const userId = req.user!.id;
+    const role = req.user!.role;
+    const projectId = req.params.id;
+    
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    
+    try {
+      let userIds: string[] = [];
+      if (assignedUsers) {
+        try {
+          userIds = JSON.parse(assignedUsers);
+        } catch(e) {
+          console.error("Failed to parse assigned users", e);
+        }
+      }
+
+      projectManager.updateProject(projectId, name, description, userIds, userId, role);
+      
+      // If there's a new image, set it
+      if (req.file) {
+        const fileUrl = `/uploads/thumbnails/${req.file.filename}`;
+        projectManager.updateProjectThumbnail(projectId, fileUrl);
+      }
+      
+      res.json({ message: 'Project updated' });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -79,6 +145,28 @@ export function createApiRoutes(
       res.json({ message: 'Project deleted' });
     } catch (e: any) {
       res.status(404).json({ error: e.message });
+    }
+  });
+
+  router.post('/projects/:id/thumbnail', upload.single('thumbnail'), (req: AuthRequest, res: Response) => {
+    const userId = req.user!.id;
+    const role = req.user!.role;
+    const projectId = req.params.id as string;
+    
+    try {
+      // Very basic auth check: just rely on loadActiveProject logic to ensure access
+      projectManager.loadActiveProject(projectId, userId, role);
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+
+      const fileUrl = `/uploads/thumbnails/${req.file.filename}`;
+      projectManager.updateProjectThumbnail(projectId, fileUrl);
+      
+      res.json({ message: 'Thumbnail updated', url: fileUrl });
+    } catch (e: any) {
+      res.status(403).json({ error: e.message });
     }
   });
 
