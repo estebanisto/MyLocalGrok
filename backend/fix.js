@@ -1,0 +1,4 @@
+const db = require('better-sqlite3')('workspace/database.sqlite');
+db.pragma('foreign_keys = OFF');
+db.exec('BEGIN TRANSACTION; CREATE TABLE projects_new (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL, createdAt TEXT NOT NULL, FOREIGN KEY (owner_id) REFERENCES users(id)); INSERT INTO projects_new (id, name, owner_id, createdAt) SELECT id, name, owner_id, createdAt FROM projects; DROP TABLE projects; ALTER TABLE projects_new RENAME TO projects; CREATE TABLE project_assignments_new (project_id TEXT NOT NULL, user_id TEXT NOT NULL, PRIMARY KEY (project_id, user_id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE); INSERT INTO project_assignments_new SELECT * FROM project_assignments; DROP TABLE project_assignments; ALTER TABLE project_assignments_new RENAME TO project_assignments; COMMIT;');
+console.log('Fixed');

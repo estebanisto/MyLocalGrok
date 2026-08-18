@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useSocket } from './hooks/useSocket';
 import { useTextToSpeech } from './hooks/useTextToSpeech';
-import { Settings, Volume2, VolumeX, Code2, LogOut, MessageSquare } from 'lucide-react';
+import { useAuth } from './hooks/useAuth';
+import { Volume2, VolumeX, Code2, MessageSquare } from 'lucide-react';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { ChatArea } from './components/chat/ChatArea';
 import { MessageInput } from './components/chat/MessageInput';
-import { ApiKeySettingsModal } from './components/settings/ApiKeySettingsModal';
 import { ProjectStateInspector } from './components/state/ProjectStateInspector';
-import { LandingPage } from './pages/LandingPage';
 import { AgentStudioModal } from './components/sidebar/AgentStudioModal';
+import { LoginPage } from './pages/LoginPage';
+import { SetupPage } from './pages/SetupPage';
 
 export type Message = {
   id: string;
@@ -25,27 +27,46 @@ export type AgentStatus = {
   status: 'idle' | 'thinking';
 };
 
-function App() {
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth();
+  
+  if (isLoading) return <div className="h-screen w-full bg-slate-900 flex items-center justify-center text-slate-400">Chargement...</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  
+  return <>{children}</>;
+}
+
+import { useParams } from 'react-router-dom';
+import { Dashboard } from './pages/Dashboard';
+
+function WorkspaceApp() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const activeProjectId = projectId;
+
   const socket = useSocket();
   const { isTtsEnabled, toggleTts, speak } = useTextToSpeech();
-  
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   
   // Workspace State
   const [messages, setMessages] = useState<Message[]>([]);
   const [agentsStatus, setAgentsStatus] = useState<AgentStatus[]>([]);
   const [agentsConfig, setAgentsConfig] = useState<any[]>([]);
-  const [currentChannel, setCurrentChannel] = useState<string>('global'); // 'global' or agentName
-  const [targetAgent, setTargetAgent] = useState<string>('Manager'); // Used in global chat
+  const [currentChannel, setCurrentChannel] = useState<string>('global');
+  const [targetAgent, setTargetAgent] = useState<string>('Manager');
   
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [projectState, setProjectState] = useState<any>(null);
 
   const fetchAgents = () => {
     if (!activeProjectId) return;
-    fetch('/api/agents')
+    fetch('/api/agents', {
+      headers: { 
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        'x-project-id': activeProjectId
+      }
+    })
       .then(res => res.json())
       .then(data => {
         setAgentsConfig(data);
@@ -59,7 +80,12 @@ function App() {
   useEffect(() => {
     if (activeProjectId) {
       fetchAgents();
-      fetch('/api/state')
+      fetch('/api/state', {
+        headers: { 
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'x-project-id': activeProjectId 
+        }
+      })
         .then(res => res.json())
         .then(data => setProjectState(data))
         .catch(console.error);
@@ -69,6 +95,7 @@ function App() {
   useEffect(() => {
     if (!socket || !activeProjectId) return;
 
+    socket.emit('join_project', activeProjectId);
     socket.emit('join_channel', currentChannel);
 
     const onHistory = (data: { channel: string, history: Message[] }) => {
@@ -80,7 +107,7 @@ function App() {
     const onMessage = (data: { channel: string, message: Message }) => {
       if (data.channel === currentChannel) {
         setMessages((prev) => [...prev, data.message]);
-        if (data.message.sender !== 'User') {
+        if (data.message.sender !== 'User' && data.message.sender !== user?.username) {
           speak(data.message.text);
         }
       }
@@ -112,7 +139,7 @@ function App() {
       socket.off('stateUpdated', onStateUpdated);
       socket.off('agentsUpdated', onAgentsUpdated);
     };
-  }, [socket, activeProjectId, currentChannel, speak]);
+  }, [socket, activeProjectId, currentChannel, speak, user]);
 
   const handleSendMessage = (text: string) => {
     if (!socket) return;
@@ -124,12 +151,13 @@ function App() {
   };
 
   if (!activeProjectId) {
-    return <LandingPage onProjectSelected={setActiveProjectId} />;
+    return <Navigate to="/" replace />;
   }
 
   return (
     <div className="flex h-screen w-full bg-slate-900 text-slate-200 overflow-hidden font-sans">
       <Sidebar 
+        projectId={activeProjectId}
         agentsStatus={agentsStatus.filter(s => s.channel === currentChannel)} 
         projectState={projectState} 
         agentsConfig={agentsConfig}
@@ -137,8 +165,7 @@ function App() {
         currentChannel={currentChannel}
         onSelectChannel={setCurrentChannel}
         onQuitProject={() => {
-          setActiveProjectId(null);
-          setCurrentChannel('global');
+          navigate('/');
         }}
       />
 
@@ -162,6 +189,13 @@ function App() {
                 {agentsConfig.map(a => <option key={a.id} value={a.name}>@{a.name}</option>)}
               </select>
             )}
+            
+            <div className="h-6 w-px bg-slate-700 mx-2"></div>
+
+            <span className="text-sm font-medium text-slate-300">
+              {user?.username} ({user?.role})
+            </span>
+
             <button 
               onClick={toggleTts}
               className={`p-2 rounded-lg transition-colors ${isTtsEnabled ? 'bg-indigo-500/20 text-indigo-400' : 'hover:bg-slate-800 text-slate-400'}`}
@@ -176,12 +210,13 @@ function App() {
             >
               <Code2 size={20} />
             </button>
+            
             <button 
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400"
-              title="Paramètres"
+              onClick={logout}
+              className="p-2 hover:bg-red-500/20 rounded-lg transition-colors text-red-400 ml-2 text-sm font-semibold flex items-center gap-1"
+              title="Déconnexion"
             >
-              <Settings size={20} />
+              Déconnexion
             </button>
           </div>
         </header>
@@ -199,12 +234,9 @@ function App() {
         <ProjectStateInspector projectState={projectState} onClose={() => setIsInspectorOpen(false)} />
       )}
 
-      {isSettingsOpen && (
-        <ApiKeySettingsModal onClose={() => setIsSettingsOpen(false)} />
-      )}
-
       {isWizardOpen && (
         <AgentStudioModal 
+          projectId={activeProjectId}
           agent={null}
           isOpen={true}
           onClose={() => setIsWizardOpen(false)}
@@ -212,6 +244,51 @@ function App() {
         />
       )}
     </div>
+  );
+}
+
+function App() {
+  const [checkingSetup, setCheckingSetup] = useState(true);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    fetch('/api/auth/check-setup')
+      .then(res => res.json())
+      .then(data => {
+        if (data.setupRequired && location.pathname !== '/setup') {
+          navigate('/setup');
+        }
+      })
+      .catch(console.error)
+      .finally(() => setCheckingSetup(false));
+  }, [navigate, location.pathname]);
+
+  if (checkingSetup) return <div className="h-screen w-full bg-slate-900 flex items-center justify-center text-slate-400">Initialisation...</div>;
+
+  return (
+    <Routes>
+      <Route path="/setup" element={<SetupPage />} />
+      <Route path="/login" element={<LoginPage />} />
+      
+      <Route 
+        path="/" 
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        } 
+      />
+      
+      <Route 
+        path="/workspace/:projectId" 
+        element={
+          <ProtectedRoute>
+            <WorkspaceApp />
+          </ProtectedRoute>
+        } 
+      />
+    </Routes>
   );
 }
 

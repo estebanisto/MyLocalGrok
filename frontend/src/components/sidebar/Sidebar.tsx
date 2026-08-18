@@ -5,6 +5,7 @@ import { AgentStudioModal } from './AgentStudioModal';
 import type { AgentConfig } from './AgentStudioModal';
 
 interface SidebarProps {
+  projectId: string;
   agentsStatus: AgentStatus[];
   projectState: any;
   agentsConfig: AgentConfig[];
@@ -14,7 +15,7 @@ interface SidebarProps {
   onQuitProject: () => void;
 }
 
-export function Sidebar({ agentsStatus, projectState, agentsConfig, onAgentsChange, currentChannel, onSelectChannel, onQuitProject }: SidebarProps) {
+export function Sidebar({ projectId, agentsStatus, projectState, agentsConfig, onAgentsChange, currentChannel, onSelectChannel, onQuitProject }: SidebarProps) {
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -127,13 +128,15 @@ export function Sidebar({ agentsStatus, projectState, agentsConfig, onAgentsChan
           </div>
         </div>
       </aside>
-
-      <AgentStudioModal 
-        agent={editingAgent} 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onSave={onAgentsChange} 
-      />
+      {isModalOpen && (
+        <AgentStudioModal
+          projectId={projectId}
+          agent={editingAgent}
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          onSave={onAgentsChange}
+        />
+      )}
     </>
   );
 }

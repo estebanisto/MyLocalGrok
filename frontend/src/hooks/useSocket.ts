@@ -7,7 +7,13 @@ export function useSocket() {
   const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    const newSocket = io(SOCKET_SERVER_URL);
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    const newSocket = io(SOCKET_SERVER_URL, {
+      auth: { token }
+    });
+    
     setSocket(newSocket);
 
     return () => {

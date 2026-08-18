@@ -6,10 +6,12 @@ import { ProjectStateService } from './ProjectStateService';
 import { ChatHistoryService } from './ChatHistoryService';
 import { AgentOrchestrator } from './AgentOrchestrator';
 import { ApiKeyManager } from './ApiKeyManager';
+import db from '../infrastructure/db/Database';
 
 export interface ProjectInfo {
   id: string;
   name: string;
+  owner_id: string;
   createdAt: string;
 }
 
@@ -22,8 +24,7 @@ export interface ProjectContext {
 }
 
 export class ProjectManagerService extends EventEmitter {
-  private projects: ProjectInfo[] = [];
-  private activeProjectContext: ProjectContext | null = null;
+  private activeContexts: Map<string, ProjectContext> = new Map();
   private readonly configPath: string;
   private readonly rootWorkspaceDir: string;
 
@@ -31,64 +32,86 @@ export class ProjectManagerService extends EventEmitter {
     super();
     this.rootWorkspaceDir = path.resolve(process.cwd(), 'workspace', 'projects');
     this.configPath = path.resolve(process.cwd(), 'workspace', 'projects_list.json');
-    this.loadProjects();
+    if (!fs.existsSync(this.rootWorkspaceDir)) {
+      fs.mkdirSync(this.rootWorkspaceDir, { recursive: true });
+    }
   }
 
-  private loadProjects() {
-    try {
-      if (!fs.existsSync(this.rootWorkspaceDir)) {
-        fs.mkdirSync(this.rootWorkspaceDir, { recursive: true });
-      }
-      if (fs.existsSync(this.configPath)) {
+  // Called during initial admin setup to migrate old projects
+  public migrateOldProjectsToAdmin(adminId: string) {
+    if (fs.existsSync(this.configPath)) {
+      try {
         const data = fs.readFileSync(this.configPath, 'utf8');
-        this.projects = JSON.parse(data);
+        const oldProjects = JSON.parse(data);
+        
+        const stmt = db.prepare('INSERT OR IGNORE INTO projects (id, name, owner_id, createdAt) VALUES (?, ?, ?, ?)');
+        const insertMany = db.transaction((projects) => {
+          for (const p of projects) {
+            stmt.run(p.id, p.name, adminId, p.createdAt || new Date().toISOString());
+          }
+        });
+        
+        insertMany(oldProjects);
+        
+        // Rename file to prevent re-migration
+        fs.renameSync(this.configPath, this.configPath + '.migrated');
+      } catch (e) {
+        console.error('Failed to migrate projects', e);
       }
-    } catch (e) {
-      console.error('Failed to load projects list', e);
     }
   }
 
-  private saveProjects() {
-    try {
-      fs.writeFileSync(this.configPath, JSON.stringify(this.projects, null, 2));
-    } catch (e) {
-      console.error('Failed to save projects list', e);
+  public getProjectsForUser(userId: string, role: string): ProjectInfo[] {
+    if (role === 'admin') {
+      return db.prepare('SELECT * FROM projects').all() as ProjectInfo[];
+    } else {
+      return db.prepare(`
+        SELECT p.* FROM projects p
+        LEFT JOIN project_assignments pa ON p.id = pa.project_id
+        WHERE p.owner_id = ? OR pa.user_id = ?
+        GROUP BY p.id
+      `).all(userId, userId) as ProjectInfo[];
     }
   }
 
-  public getProjects(): ProjectInfo[] {
-    return this.projects;
-  }
+  public deleteProject(id: string, userId: string, role: string): void {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectInfo;
+    if (!project) throw new Error(`Project ${id} not found`);
 
-  public deleteProject(id: string): void {
-    const index = this.projects.findIndex(p => p.id === id);
-    if (index === -1) throw new Error(`Project ${id} not found`);
+    if (role !== 'admin' && project.owner_id !== userId) {
+      throw new Error('Unauthorized to delete this project (only Admin or Owner can delete)');
+    }
 
-    this.projects.splice(index, 1);
-    this.saveProjects();
+    db.prepare('DELETE FROM projects WHERE id = ?').run(id);
 
     const projectDir = path.join(this.rootWorkspaceDir, id);
     if (fs.existsSync(projectDir)) {
       fs.rmSync(projectDir, { recursive: true, force: true });
     }
 
-    if (this.activeProjectContext && this.activeProjectContext.id === id) {
-      this.activeProjectContext = null;
-      this.emit('activeProjectChanged', null);
+    if (this.activeContexts.has(id)) {
+      this.activeContexts.delete(id);
     }
     
-    this.emit('projectsUpdated', this.projects);
+    this.emit('projectsUpdated');
   }
 
-  public createProject(name: string): ProjectInfo {
+  public createProject(name: string, owner_id: string): ProjectInfo {
     const id = Math.random().toString(36).substring(7) + '-' + Date.now().toString(36);
-    const newProject = { id, name, createdAt: new Date().toISOString() };
-    this.projects.push(newProject);
-    this.saveProjects();
+    const createdAt = new Date().toISOString();
+    
+    db.transaction(() => {
+      db.prepare('INSERT INTO projects (id, name, owner_id, createdAt) VALUES (?, ?, ?, ?)').run(id, name, owner_id, createdAt);
+      db.prepare('INSERT INTO project_assignments (project_id, user_id) VALUES (?, ?)').run(id, owner_id);
+    })();
+
+    const newProject = { id, name, owner_id, createdAt };
 
     // Create the project folder
     const projectDir = path.join(this.rootWorkspaceDir, id);
-    fs.mkdirSync(projectDir, { recursive: true });
+    if (!fs.existsSync(projectDir)) {
+      fs.mkdirSync(projectDir, { recursive: true });
+    }
 
     // Initialize default project state
     const defaultState = {
@@ -116,13 +139,25 @@ export class ProjectManagerService extends EventEmitter {
     ];
     fs.writeFileSync(path.join(projectDir, 'agentsConfig.json'), JSON.stringify(defaultAgents, null, 2));
 
-    this.emit('projectsUpdated', this.projects);
+    this.emit('projectsUpdated');
     return newProject;
   }
 
-  public loadActiveProject(id: string): ProjectContext {
-    const project = this.projects.find(p => p.id === id);
+  public loadActiveProject(id: string, userId: string, role: string): ProjectContext {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectInfo;
     if (!project) throw new Error(`Project ${id} not found`);
+
+    if (role !== 'admin' && project.owner_id !== userId) {
+      // Check if user is assigned
+      const assigned = db.prepare('SELECT 1 FROM project_assignments WHERE project_id = ? AND user_id = ?').get(id, userId);
+      if (!assigned) {
+        throw new Error('Unauthorized to load this project');
+      }
+    }
+
+    if (this.activeContexts.has(id)) {
+      return this.activeContexts.get(id)!;
+    }
 
     const projectDir = path.join(this.rootWorkspaceDir, id);
     if (!fs.existsSync(projectDir)) {
@@ -134,13 +169,49 @@ export class ProjectManagerService extends EventEmitter {
     const historyService = new ChatHistoryService(sandbox);
     const orchestrator = new AgentOrchestrator(stateService, sandbox, this.keyManager);
 
-    this.activeProjectContext = { id, sandbox, stateService, historyService, orchestrator };
-    this.emit('activeProjectChanged', this.activeProjectContext);
+    const context = { id, sandbox, stateService, historyService, orchestrator };
+    this.activeContexts.set(id, context);
     
-    return this.activeProjectContext;
+    // Emit event so server can hook socket events for this context if needed
+    this.emit('projectContextLoaded', context);
+    
+    return context;
   }
 
-  public getActiveContext(): ProjectContext | null {
-    return this.activeProjectContext;
+  public getContext(projectId: string): ProjectContext | null {
+    return this.activeContexts.get(projectId) || null;
+  }
+
+  public getProjectAssignments(projectId: string): string[] {
+    const rows = db.prepare('SELECT user_id FROM project_assignments WHERE project_id = ?').all(projectId) as { user_id: string }[];
+    return rows.map(r => r.user_id);
+  }
+
+  public assignUserToProject(projectId: string, targetUserId: string, assignerId: string, assignerRole: string): void {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectInfo;
+    if (!project) throw new Error('Project not found');
+
+    if (assignerRole !== 'admin' && project.owner_id !== assignerId) {
+      throw new Error('Only the project owner or an admin can assign users');
+    }
+
+    db.prepare('INSERT OR IGNORE INTO project_assignments (project_id, user_id) VALUES (?, ?)').run(projectId, targetUserId);
+    this.emit('projectsUpdated');
+  }
+
+  public removeUserFromProject(projectId: string, targetUserId: string, assignerId: string, assignerRole: string): void {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as ProjectInfo;
+    if (!project) throw new Error('Project not found');
+
+    if (assignerRole !== 'admin' && project.owner_id !== assignerId) {
+      throw new Error('Only the project owner or an admin can remove users');
+    }
+    
+    if (project.owner_id === targetUserId) {
+      throw new Error('Cannot remove the project owner from the project');
+    }
+
+    db.prepare('DELETE FROM project_assignments WHERE project_id = ? AND user_id = ?').run(projectId, targetUserId);
+    this.emit('projectsUpdated');
   }
 }

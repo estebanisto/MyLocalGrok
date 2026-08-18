@@ -11,17 +11,28 @@ export interface AgentConfig {
   role: string;
   systemPrompt: string;
   themeColor: string;
+  model?: string;
+  modelId?: string;
+  temperature?: number;
 }
 
 interface AgentStudioModalProps {
-  agent?: AgentConfig | null;
+  projectId: string;
+  agent: AgentConfig | null;
   isOpen: boolean;
   onClose: () => void;
   onSave: () => void;
 }
 
-export function AgentStudioModal({ agent, isOpen, onClose, onSave }: AgentStudioModalProps) {
-  const [formData, setFormData] = useState<Partial<AgentConfig>>({});
+export function AgentStudioModal({ projectId, agent, isOpen, onClose, onSave }: AgentStudioModalProps) {
+  const [formData, setFormData] = useState<Partial<AgentConfig>>({
+    name: '',
+    role: '',
+    systemPrompt: '',
+    modelId: 'gemini-2.5-flash',
+    temperature: 0.7,
+    themeColor: 'indigo'
+  });
 
   useEffect(() => {
     if (agent) {
@@ -32,7 +43,8 @@ export function AgentStudioModal({ agent, isOpen, onClose, onSave }: AgentStudio
         role: '',
         systemPrompt: '',
         themeColor: 'indigo',
-        model: 'gemini-3.5-flash'
+        modelId: 'gemini-2.5-flash',
+        temperature: 0.7
       });
     }
   }, [agent, isOpen]);
@@ -42,26 +54,29 @@ export function AgentStudioModal({ agent, isOpen, onClose, onSave }: AgentStudio
     if (!formData.name || !formData.name.trim()) return;
 
     try {
-      const payload = {
-        ...formData,
-        name: formData.name.trim()
-      };
-
       if (agent?.id) {
         // Update
         await fetch(`/api/agents/${agent.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'x-project-id': projectId
+          },
+          body: JSON.stringify(formData)
         });
       } else {
         // Create
         await fetch('/api/agents', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'x-project-id': projectId
+          },
           body: JSON.stringify({
-            ...payload,
-            id: payload.name?.toLowerCase().replace(/\s+/g, '-') + '-' + Math.random().toString(36).substring(7)
+            ...formData,
+            id: Math.random().toString(36).substring(7)
           })
         });
       }
@@ -121,7 +136,7 @@ export function AgentStudioModal({ agent, isOpen, onClose, onSave }: AgentStudio
             <label className="text-sm font-medium text-slate-300">Modèle Gemini</label>
             <Select 
               value={formData.model || 'gemini-3.5-flash'} 
-              onValueChange={value => setFormData({ ...formData, model: value })}
+              onValueChange={(value) => setFormData({ ...formData, model: value || 'gemini-3.5-flash' })}
             >
               <SelectTrigger className="bg-slate-800 border-slate-700 focus:ring-indigo-500">
                 <SelectValue placeholder="Choisir un modèle" />

@@ -7,6 +7,7 @@ import path from 'path';
 import { ApiKeyManager } from './services/ApiKeyManager';
 import { ProjectManagerService, ProjectContext } from './services/ProjectManagerService';
 import { createApiRoutes } from './routes/api';
+import { createAuthRoutes } from './routes/auth';
 import { setupChatHandler } from './infrastructure/socket/chatHandler';
 
 const app = express();
@@ -21,7 +22,9 @@ app.use(express.json());
 const keyManager = new ApiKeyManager();
 const projectManager = new ProjectManagerService(keyManager);
 
+app.use('/api/auth', createAuthRoutes(projectManager));
 app.use('/api', createApiRoutes(keyManager, projectManager));
+
 
 setupChatHandler(io, projectManager);
 
@@ -33,19 +36,21 @@ keyManager.on('keysUpdated', (keys) => {
 });
 
 // Broadcast events from the active project context
-projectManager.on('activeProjectChanged', (ctx: ProjectContext) => {
-  io.emit('activeProjectChanged', ctx.id);
+projectManager.on('projectContextLoaded', (ctx: ProjectContext) => {
+  // Only register listeners once per context
+  if ((ctx as any)._listenersRegistered) return;
+  (ctx as any)._listenersRegistered = true;
   
   ctx.stateService.on('stateUpdated', (state) => {
-    io.emit('stateUpdated', state);
+    io.to(`project_${ctx.id}`).emit('stateUpdated', state);
   });
   
   ctx.orchestrator.on('agentsUpdated', (configs) => {
-    io.emit('agentsUpdated', configs);
+    io.to(`project_${ctx.id}`).emit('agentsUpdated', configs);
   });
 });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`MyLocalGrok Backend running on port ${PORT}`);
+  console.log(`MindForge Backend running on port ${PORT}`);
 });
