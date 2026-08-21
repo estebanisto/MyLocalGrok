@@ -196,8 +196,16 @@ export function setupChatHandler(io: Server, projectManager: ProjectManagerServi
       io.to(roomName).emit('message', { channel, message: userMsg });
 
       // Determine which agent should answer
-      const agentName = channel !== 'global' ? channel : (data.targetAgent || 'Manager');
+      let agentName = channel !== 'global' ? channel : (data.targetAgent || 'Manager');
       
+      // Fallback: if in global channel and the specific agent is not found, use the first available agent
+      if (channel === 'global' && !ctx.orchestrator.getAgent(agentName)) {
+        const available = ctx.orchestrator.getAvailableAgents();
+        if (available.length > 0) {
+          agentName = available[0];
+        }
+      }
+
       processAgentTurn(agentName, data.text, channel, ctx, io).catch(console.error);
     });
 

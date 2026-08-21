@@ -25,11 +25,72 @@ interface AgentStudioModalProps {
 }
 
 export function AgentStudioModal({ projectId, agent, isOpen, onClose, onSave }: AgentStudioModalProps) {
+  const [localModels, setLocalModels] = useState<string[]>([]);
+  const [hasGemini, setHasGemini] = useState(false);
+  const [geminiModels, setGeminiModels] = useState<Array<{id: string, name: string}>>([]);
+  const [hasGrok, setHasGrok] = useState(false);
+  const [hasOpenAI, setHasOpenAI] = useState(false);
+  const [isLoadingProviders, setIsLoadingProviders] = useState(true);
+
+  useEffect(() => {
+    if (isOpen) {
+      setIsLoadingProviders(true);
+      
+      // 1. Check local models
+      const ollamaUrl = localStorage.getItem('ollamaUrl');
+      const p1 = ollamaUrl 
+        ? fetch(`/api/ollama/tags?url=${encodeURIComponent(ollamaUrl)}`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+          })
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            if (data && data.models) {
+              setLocalModels(data.models.map((m: any) => m.name));
+            } else {
+              setLocalModels([]);
+            }
+          })
+          .catch(() => setLocalModels([]))
+        : Promise.resolve(setLocalModels([]));
+
+      // 2. Check LocalStorage API Keys
+      setHasGrok(!!localStorage.getItem('grokKey'));
+      setHasOpenAI(!!localStorage.getItem('openAIKey'));
+
+      // 3. Check Gemini Keys & fetch dynamic models
+      const p2Keys = fetch('/api/keys', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        setHasGemini(Array.isArray(data) && data.length > 0);
+      })
+      .catch(() => setHasGemini(false));
+
+      const p2Models = fetch('/api/gemini/models', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setGeminiModels(data);
+        } else {
+          setGeminiModels([]);
+        }
+      })
+      .catch(() => setGeminiModels([]));
+
+      Promise.all([p1, p2Keys, p2Models]).finally(() => {
+        setIsLoadingProviders(false);
+      });
+    }
+  }, [isOpen]);
+
   const [formData, setFormData] = useState<Partial<AgentConfig>>({
     name: '',
     role: '',
     systemPrompt: '',
-    modelId: 'gemini-2.5-flash',
+    model: 'gemini-3.5-flash',
     temperature: 0.7,
     themeColor: 'indigo'
   });
@@ -43,7 +104,7 @@ export function AgentStudioModal({ projectId, agent, isOpen, onClose, onSave }: 
         role: '',
         systemPrompt: '',
         themeColor: 'indigo',
-        modelId: 'gemini-2.5-flash',
+        model: 'gemini-3.5-flash',
         temperature: 0.7
       });
     }
@@ -133,17 +194,64 @@ export function AgentStudioModal({ projectId, agent, isOpen, onClose, onSave }: 
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-300">Modèle Gemini</label>
+            <label className="text-sm font-medium text-slate-300">Modèle (IA)</label>
             <Select 
+              key={isLoadingProviders ? 'loading' : 'ready'}
+              disabled={isLoadingProviders}
               value={formData.model || 'gemini-3.5-flash'} 
               onValueChange={(value) => setFormData({ ...formData, model: value || 'gemini-3.5-flash' })}
             >
               <SelectTrigger className="bg-slate-800 border-slate-700 focus:ring-indigo-500">
-                <SelectValue placeholder="Choisir un modèle" />
+                <SelectValue placeholder={isLoadingProviders ? "Chargement des modèles..." : "Choisir un modèle"} />
               </SelectTrigger>
               <SelectContent className="bg-slate-800 border-slate-700 text-slate-200">
-                <SelectItem value="gemini-3.5-flash">Flash 3.5 - Standard</SelectItem>
-                <SelectItem value="gemini-3.7-flash">Flash 3.7 - Avancé</SelectItem>
+                {hasGemini && (
+                  <>
+                    <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 uppercase mt-1 border-b border-slate-700/50 mb-1">Google Gemini</div>
+                    {geminiModels.length > 0 ? (
+                      geminiModels.map(model => (
+                        <SelectItem key={model.id} value={model.id}>{model.name}</SelectItem>
+                      ))
+                    ) : (
+                      <>
+                        <SelectItem value="gemini-3.5-flash-lite">3.5 Flash-Lite</SelectItem>
+                        <SelectItem value="gemini-3.7-flash">3.7 Flash</SelectItem>
+                        <SelectItem value="gemini-3.1-pro-preview">3.1 Pro</SelectItem>
+                        <SelectItem value="gemini-extended-reasoning">Raisonnement Étendu</SelectItem>
+                      </>
+                    )}
+                  </>
+                )}
+
+                {hasOpenAI && (
+                  <>
+                    <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 uppercase mt-2 border-b border-slate-700/50 mb-1">OpenAI</div>
+                    <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                    <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                  </>
+                )}
+
+                {hasGrok && (
+                  <>
+                    <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 uppercase mt-2 border-b border-slate-700/50 mb-1">xAI Grok</div>
+                    <SelectItem value="grok-beta">Grok Beta</SelectItem>
+                  </>
+                )}
+
+                {localModels.length > 0 && (
+                  <>
+                    <div className="px-2 py-1.5 text-xs font-semibold text-slate-500 uppercase mt-2 border-b border-slate-700/50 mb-1">Modèles Locaux (Ollama)</div>
+                    {localModels.map(modelName => (
+                      <SelectItem key={modelName} value={`ollama:${modelName}`}>Local : {modelName}</SelectItem>
+                    ))}
+                  </>
+                )}
+                
+                {(!hasGemini && !hasOpenAI && !hasGrok && localModels.length === 0) && (
+                  <div className="px-3 py-4 text-sm text-center text-amber-500/80 bg-amber-500/10 rounded-md m-2 border border-amber-500/20">
+                    Aucun fournisseur d'IA configuré.<br/>Veuillez ajouter une clé API ou configurer Ollama dans les réglages globaux.
+                  </div>
+                )}
               </SelectContent>
             </Select>
           </div>

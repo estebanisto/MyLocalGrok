@@ -11,9 +11,11 @@ export function ApiKeySettingsModal({ onClose, inline = false }: ApiKeySettingsM
   const [newKey, setNewKey] = useState('');
 
   const fetchKeys = () => {
-    fetch('/api/keys')
+    fetch('/api/keys', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
       .then(res => res.json())
-      .then(data => setKeys(data))
+      .then(data => setKeys(Array.isArray(data) ? data : []))
       .catch(console.error);
   };
 
@@ -26,7 +28,10 @@ export function ApiKeySettingsModal({ onClose, inline = false }: ApiKeySettingsM
     if (!newKey.trim()) return;
     fetch('/api/keys', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      },
       body: JSON.stringify({ key: newKey.trim() })
     }).then(() => {
       setNewKey('');
@@ -35,7 +40,10 @@ export function ApiKeySettingsModal({ onClose, inline = false }: ApiKeySettingsM
   };
 
   const handleRemove = (id: string) => {
-    fetch(`/api/keys/${id}`, { method: 'DELETE' }).then(fetchKeys);
+    fetch(`/api/keys/${id}`, { 
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    }).then(fetchKeys);
   };
 
   const content = (

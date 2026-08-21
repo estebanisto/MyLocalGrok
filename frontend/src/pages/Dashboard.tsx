@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useSocket } from '../hooks/useSocket';
 import { useNavigate } from 'react-router-dom';
-import { Users, Folder, Settings, UserPlus, Edit2, Trash2, Save, X, Plus, LogOut, Code2, Activity, Download, Image as ImageIcon, Search } from 'lucide-react';
-import { ApiKeySettingsModal } from '../components/settings/ApiKeySettingsModal';
+import { Users, Folder, Settings, UserPlus, Edit2, Trash2, Save, X, Plus, LogOut, Code2, Activity, Download, Image as ImageIcon, Search, Eye, EyeOff } from 'lucide-react';
 
 interface ProjectInfo {
   id: string;
@@ -62,6 +61,108 @@ export function Dashboard() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [projectAssignments, setProjectAssignments] = useState<string[]>([]);
 
+  // Settings State
+  const [workspaceName, setWorkspaceName] = useState(() => localStorage.getItem('workspaceName') || 'MindForge');
+  const [ollamaUrl, setOllamaUrl] = useState(() => localStorage.getItem('ollamaUrl') || '');
+  const [geminiKeys, setGeminiKeys] = useState<any[]>([]);
+  const [newGeminiKey, setNewGeminiKey] = useState('');
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [grokKey, setGrokKey] = useState(() => localStorage.getItem('grokKey') || '');
+  const [openAIKey, setOpenAIKey] = useState(() => localStorage.getItem('openAIKey') || '');
+  const [showGrokKey, setShowGrokKey] = useState(false);
+  const [showOpenAIKey, setShowOpenAIKey] = useState(false);
+  const [appLanguage, setAppLanguage] = useState(() => localStorage.getItem('appLanguage') || 'fr');
+  const [dateFormat, setDateFormat] = useState(() => localStorage.getItem('dateFormat') || 'DD/MM/YYYY');
+
+  const [selectedLocalModel, setSelectedLocalModel] = useState('qwen');
+  const [customLocalModel, setCustomLocalModel] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [localModels, setLocalModels] = useState<any[]>([]);
+
+  const fetchOllamaModels = async () => {
+    if (!ollamaUrl) {
+      setLocalModels([]);
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/ollama/tags?url=${encodeURIComponent(ollamaUrl)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed to fetch tags');
+      const data = await res.json();
+      if (data.models) {
+        setLocalModels(data.models.map((m: any) => ({
+          id: m.name,
+          name: m.name,
+          size: (m.size / 1e9).toFixed(1) + ' GB'
+        })));
+      }
+    } catch (e) {
+      console.error(e);
+      setLocalModels([]);
+    }
+  };
+
+  const handleDownloadModel = async () => {
+    const modelToDownload = customLocalModel || selectedLocalModel;
+    if (!ollamaUrl) {
+      alert("Veuillez d'abord renseigner l'URL locale de votre Ollama (ex: http://localhost:11434) juste au-dessus.");
+      return;
+    }
+    if (!modelToDownload) return;
+    
+    setIsDownloading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/ollama/pull', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ url: ollamaUrl, name: modelToDownload.includes(':') ? modelToDownload : `${modelToDownload}:latest` })
+      });
+      if (!res.ok) throw new Error();
+      await fetchOllamaModels();
+      setCustomLocalModel('');
+    } catch (e) {
+      alert("Erreur lors du téléchargement. Vérifiez que l'URL Ollama est correcte et qu'Ollama est lancé.");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleRemoveLocalModel = async (name: string) => {
+    if (!ollamaUrl) return;
+    try {
+      const token = localStorage.getItem('token');
+      await fetch('/api/ollama/delete', {
+        method: 'DELETE',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ url: ollamaUrl, name })
+      });
+      await fetchOllamaModels();
+    } catch (e) {
+      alert("Erreur lors de la suppression du modèle.");
+    }
+  };
+
+  const handleSaveSettings = () => {
+    localStorage.setItem('workspaceName', workspaceName);
+    localStorage.setItem('ollamaUrl', ollamaUrl);
+    localStorage.setItem('grokKey', grokKey);
+    localStorage.setItem('openAIKey', openAIKey);
+    localStorage.setItem('appLanguage', appLanguage);
+    localStorage.setItem('dateFormat', dateFormat);
+    
+    // Notification (simple alert pour le moment)
+    alert('Les réglages ont été enregistrés avec succès.');
+  };
+
   const fetchUsers = () => {
     fetch('/api/auth/users', {
       headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
@@ -80,12 +181,50 @@ export function Dashboard() {
       .catch(console.error);
   };
 
+  const fetchGeminiKeys = () => {
+    fetch('/api/keys', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    })
+      .then(res => res.json())
+      .then(data => setGeminiKeys(Array.isArray(data) ? data : []))
+      .catch(console.error);
+  };
+
+  const handleAddGeminiKey = () => {
+    if (!newGeminiKey.trim()) return;
+    fetch('/api/keys', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      },
+      body: JSON.stringify({ key: newGeminiKey.trim() })
+    }).then(() => {
+      setNewGeminiKey('');
+      fetchGeminiKeys();
+    });
+  };
+
+  const handleRemoveGeminiKey = (id: string) => {
+    fetch(`/api/keys/${id}`, { 
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    }).then(fetchGeminiKeys);
+  };
+
   useEffect(() => {
     fetchProjects();
     if (user?.role === 'admin' || user?.role === 'team_lead') {
       fetchUsers();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (activeTab === 'settings') {
+      fetchGeminiKeys();
+      fetchOllamaModels();
+    }
+  }, [activeTab, ollamaUrl]);
 
   // Project Handlers
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -205,30 +344,6 @@ export function Dashboard() {
     });
   };
 
-  const handleUploadThumbnail = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    const formData = new FormData();
-    formData.append('thumbnail', file);
-
-    try {
-      const res = await fetch(`/api/projects/${id}/thumbnail`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-        body: formData
-      });
-      if (res.ok) {
-        fetchProjects(); // Rafraichir les images
-      } else {
-        const error = await res.json();
-        alert(`Erreur: ${error.error}`);
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Erreur lors de l'upload de l'image.");
-    }
-  };
 
   const handleDeleteProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -392,15 +507,22 @@ export function Dashboard() {
       <div className="w-64 h-full border-r border-slate-800 bg-slate-800 flex flex-col shrink-0">
         
         {/* Logo Section */}
-        <div className="p-6 border-b border-slate-800">
+        <div className="p-6 border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="bg-indigo-500/20 p-2 rounded-lg">
+            <div className="bg-indigo-500/20 p-2 rounded-lg shrink-0">
               <Code2 className="text-indigo-400" size={24} />
             </div>
-            <h1 className="text-xl font-bold">
-              <span className="text-slate-100">Mind</span>
-              <span className="text-indigo-400">Forge</span>
-            </h1>
+            <div className="flex flex-col overflow-hidden">
+              <h1 className="text-xl font-bold truncate">
+                <span className="text-slate-100">Mind</span>
+                <span className="text-indigo-400">Forge</span>
+              </h1>
+              {workspaceName && workspaceName !== 'MindForge' && (
+                <div className="text-xs font-medium text-slate-400 truncate mt-0.5">
+                  {workspaceName}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         
@@ -464,6 +586,9 @@ export function Dashboard() {
             >
               <LogOut size={16} /> Quitter
             </button>
+            <div className="text-center mt-1">
+              <span className="text-xs text-slate-500">Propulsé par MindForge</span>
+            </div>
           </div>
         </div>
       </div>
@@ -929,12 +1054,332 @@ export function Dashboard() {
 
           {/* SETTINGS TAB */}
           {activeTab === 'settings' && user?.role === 'admin' && (
-            <div className="max-w-4xl mx-auto space-y-8">
-              <div>
-                <h2 className="text-2xl font-semibold mb-2">Réglages Globaux</h2>
-                <p className="text-slate-400">Configurez les paramètres généraux de la plateforme.</p>
+            <div className="max-w-6xl mx-auto space-y-8 pb-10">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-semibold mb-2">Réglages Globaux</h2>
+                  <p className="text-slate-400">Configurez les paramètres généraux de la plateforme.</p>
+                </div>
+                <button 
+                  onClick={handleSaveSettings}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-colors font-medium shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 shrink-0"
+                >
+                  <Save size={18} />
+                  Enregistrer les modifications
+                </button>
               </div>
-              <ApiKeySettingsModal onClose={() => {}} inline={true} />
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                {/* COLONNE GAUCHE */}
+                <div className="flex flex-col gap-6">
+                  
+                  {/* 1. Personnalisation */}
+                  <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+                    <div className="p-6 bg-slate-800 border-b border-slate-700">
+                      <h3 className="text-lg font-semibold">1. Personnalisation (Marque Blanche)</h3>
+                    </div>
+                    <div className="p-6">
+                      <label className="block text-sm text-slate-400 mb-1.5">Nom de l'espace de travail</label>
+                      <input 
+                        type="text" 
+                        value={workspaceName}
+                        onChange={e => setWorkspaceName(e.target.value)}
+                        placeholder="ex: Grease"
+                        className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" 
+                      />
+                    </div>
+                  </div>
+
+                  {/* 2. Fournisseurs d'IA */}
+                  <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+                    <div className="p-6 bg-slate-800 border-b border-slate-700">
+                      <h3 className="text-lg font-semibold">2. Fournisseurs d'IA (API & Local)</h3>
+                    </div>
+                    <div className="p-6 space-y-4">
+                      <div>
+                        <label className="block text-sm text-slate-400 mb-1.5">Ollama (Local URL)</label>
+                        <input 
+                          type="text" 
+                          value={ollamaUrl}
+                          onChange={e => setOllamaUrl(e.target.value)}
+                          placeholder="http://localhost:11434"
+                          className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 mb-1.5">Google Gemini (API Key)</label>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <input 
+                              type={showGeminiKey ? "text" : "password"} 
+                              autoComplete="new-password"
+                              value={newGeminiKey}
+                              onChange={e => setNewGeminiKey(e.target.value)}
+                              placeholder="Ajouter une nouvelle clé Gemini..."
+                              className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg pl-4 pr-10 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none [&:-webkit-autofill]:[WebkitBoxShadow:0_0_0_30px_#131314_inset] [&:-webkit-autofill]:[-webkit-text-fill-color:white]" 
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => setShowGeminiKey(!showGeminiKey)}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                            >
+                              {showGeminiKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
+                          </div>
+                          <button
+                            onClick={handleAddGeminiKey}
+                            disabled={!newGeminiKey.trim()}
+                            className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white rounded-lg transition-colors flex items-center justify-center font-medium shrink-0"
+                          >
+                            Ajouter
+                          </button>
+                        </div>
+                        
+                        {/* Liste des clés actives */}
+                        {geminiKeys.length > 0 && (
+                          <div className="space-y-2 mt-3">
+                            {geminiKeys.map(k => (
+                              <div key={k.id} className="flex items-center justify-between p-2.5 bg-slate-900/50 border border-slate-800 rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <span className="font-mono text-sm text-slate-300">{k.keyMasked}</span>
+                                  <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${
+                                    k.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
+                                  }`}>
+                                    {k.status}
+                                  </span>
+                                </div>
+                                <button 
+                                  onClick={() => handleRemoveGeminiKey(k.id)} 
+                                  className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-md transition-colors"
+                                  title="Supprimer la clé"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 mb-1.5">Grok (API Key)</label>
+                        <div className="relative">
+                          <input 
+                            type={showGrokKey ? "text" : "password"} 
+                            autoComplete="new-password"
+                            value={grokKey}
+                            onChange={e => setGrokKey(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg pl-4 pr-10 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none [&:-webkit-autofill]:[WebkitBoxShadow:0_0_0_30px_#131314_inset] [&:-webkit-autofill]:[-webkit-text-fill-color:white]" 
+                          />
+                          <button 
+                            type="button"
+                            onClick={() => setShowGrokKey(!showGrokKey)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                          >
+                            {showGrokKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 mb-1.5">OpenAI (API Key)</label>
+                        <div className="relative">
+                          <input 
+                            type={showOpenAIKey ? "text" : "password"} 
+                            autoComplete="new-password"
+                            value={openAIKey}
+                            onChange={e => setOpenAIKey(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg pl-4 pr-10 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none [&:-webkit-autofill]:[WebkitBoxShadow:0_0_0_30px_#131314_inset] [&:-webkit-autofill]:[-webkit-text-fill-color:white]" 
+                          />
+                          <button 
+                            type="button"
+                            onClick={() => setShowOpenAIKey(!showOpenAIKey)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                          >
+                            {showOpenAIKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2.5 Gestionnaire de Modèles Locaux (Ollama) */}
+                  <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+                    <div className="p-6 bg-slate-800 border-b border-slate-700">
+                      <h3 className="text-lg font-semibold">Gestionnaire de Modèles Locaux (Ollama)</h3>
+                    </div>
+                    
+                    <div className="p-6 space-y-6">
+                      {/* Section : Télécharger une nouvelle IA */}
+                      <div>
+                        <label className="block text-sm text-slate-400 mb-2">Télécharger une nouvelle IA</label>
+                        <div className="flex flex-col sm:flex-row gap-3">
+                          <select 
+                            value={selectedLocalModel}
+                            onChange={e => {
+                              setSelectedLocalModel(e.target.value);
+                              setCustomLocalModel('');
+                            }}
+                            className="bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none flex-1"
+                          >
+                            <option value="qwen">Qwen (Expert Code & Logique)</option>
+                            <option value="llama3">Llama (Assistant Polyvalent)</option>
+                            <option value="mistral">Mistral (Expert Rédaction)</option>
+                            <option value="phi3">Phi (Modèle ultra-léger)</option>
+                            <option value="">Autre (Tag personnalisé)</option>
+                          </select>
+                          <button
+                            onClick={handleDownloadModel}
+                            disabled={isDownloading || (!selectedLocalModel && !customLocalModel.trim())}
+                            className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg transition-colors font-medium whitespace-nowrap flex items-center justify-center gap-2"
+                          >
+                            <Download size={18} />
+                            Télécharger & Installer
+                          </button>
+                        </div>
+                        
+                        {selectedLocalModel === '' && (
+                          <div className="mt-3">
+                            <input 
+                              type="text" 
+                              value={customLocalModel}
+                              onChange={e => setCustomLocalModel(e.target.value)}
+                              placeholder="Ou tapez un tag spécifique (ex: llava:latest)"
+                              className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none" 
+                            />
+                          </div>
+                        )}
+                        
+                        {/* Barre de progression indéterminée */}
+                        {isDownloading && (
+                          <div className="mt-4">
+                            <div className="flex justify-between text-xs text-slate-400 mb-1">
+                              <span className="animate-pulse">Téléchargement en cours (ceci peut prendre plusieurs minutes, ne quittez pas la page)...</span>
+                            </div>
+                            <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-700 relative">
+                              <div className="bg-indigo-500 h-2 rounded-full absolute top-0 left-0 animate-[indeterminate_2s_infinite]"></div>
+                            </div>
+                            <style dangerouslySetInnerHTML={{__html: `
+                              @keyframes indeterminate {
+                                0% { width: 0%; left: 0%; }
+                                50% { width: 30%; left: 70%; }
+                                100% { width: 0%; left: 100%; }
+                              }
+                            `}} />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Section : Modèles installés */}
+                      <div className="pt-6 border-t border-slate-700">
+                        <h4 className="text-sm font-semibold text-slate-400 mb-3">Modèles installés</h4>
+                        {localModels.length === 0 ? (
+                          <div className="text-sm text-slate-500 text-center py-4 bg-slate-900/50 rounded-lg border border-dashed border-slate-800">
+                            Aucun modèle installé.
+                          </div>
+                        ) : (
+                          <ul className="space-y-2">
+                            {localModels.map(model => (
+                              <li key={model.id} className="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-800 rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <span className="font-medium text-slate-200">{model.name}</span>
+                                  <span className="text-xs text-slate-500">{model.size}</span>
+                                  <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">Prêt</span>
+                                </div>
+                                <button 
+                                  onClick={() => handleRemoveLocalModel(model.id)}
+                                  className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-md transition-colors" 
+                                  title="Supprimer"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* COLONNE DROITE */}
+                <div className="flex flex-col gap-6">
+                  
+                  {/* 3. Interface & Affichage */}
+                  <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+                    <div className="p-6 bg-slate-800 border-b border-slate-700">
+                      <h3 className="text-lg font-semibold">3. Interface & Affichage</h3>
+                    </div>
+                    <div className="p-6 space-y-4">
+                      <div>
+                        <label className="block text-sm text-slate-400 mb-1.5">Langue de l'application</label>
+                        <select 
+                          value={appLanguage}
+                          onChange={e => setAppLanguage(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        >
+                          <option value="fr">Français</option>
+                          <option value="en">English</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 mb-1.5">Format de date</label>
+                        <select 
+                          value={dateFormat}
+                          onChange={e => setDateFormat(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        >
+                          <option value="DD/MM/YYYY">JJ/MM/AAAA</option>
+                          <option value="MM/DD/YYYY">MM/JJ/AAAA</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 4. Système & Stockage */}
+                  <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+                    <div className="p-6 bg-slate-800 border-b border-slate-700">
+                      <h3 className="text-lg font-semibold">4. Système & Stockage</h3>
+                    </div>
+                    <div className="p-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-300">Version de MindForge : <span className="font-semibold text-white">1.0.0</span></span>
+                        <button className="px-4 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm rounded-lg transition-colors border border-slate-600">
+                          Vérifier les MAJ
+                        </button>
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 mb-1.5">Dossier de travail local</label>
+                        <input 
+                          type="text" 
+                          value="/workspace/data"
+                          readOnly
+                          className="w-full bg-slate-900/50 border border-slate-700/50 text-slate-500 rounded-lg px-4 py-2.5 cursor-not-allowed" 
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 5. Sauvegarde Système */}
+                  <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+                    <div className="p-6 bg-slate-800 border-b border-slate-700">
+                      <h3 className="text-lg font-semibold">5. Sauvegarde Système</h3>
+                    </div>
+                    <div className="p-6">
+                      <p className="text-slate-400 text-sm mb-4">
+                        Générez une archive .zip contenant toutes les données locales (base de données, configurations, et clés). Cette fonction permet une restauration complète en cas de besoin.
+                      </p>
+                      <button 
+                        onClick={() => console.log('Génération de la sauvegarde .zip en cours...')}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-200 rounded-lg transition-colors"
+                      >
+                        <Download size={18} />
+                        Générer une sauvegarde (.zip)
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
             </div>
           )}
 
