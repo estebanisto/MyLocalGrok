@@ -723,9 +723,111 @@ export function Dashboard() {
                 <p className="text-slate-400">Ajoutez de nouveaux membres et gérez leurs accès aux projets.</p>
               </div>
 
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                {/* User Creation & List */}
-                <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                {/* Left Column: User List */}
+                <div className="lg:col-span-2">
+                  <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead className="bg-slate-800 border-b border-slate-700">
+                          <tr>
+                            <th className="py-4 px-4 text-xs uppercase font-semibold text-slate-400">Utilisateur</th>
+                            <th className="py-4 px-4 text-xs uppercase font-semibold text-slate-400">Rôle</th>
+                            {user?.role === 'admin' && <th className="py-4 px-4 text-xs uppercase font-semibold text-slate-400 text-right">Actions</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/50">
+                          {users.map(u => (
+                            <tr key={u.id} className="hover:bg-slate-700/30 transition-colors">
+                              <td className="py-4 px-4">
+                                {editingUserId === u.id ? (
+                                  <div className="space-y-2">
+                                    <input 
+                                      type="text" 
+                                      value={editForm.username}
+                                      onChange={e => setEditForm({ ...editForm, username: e.target.value })}
+                                      className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    />
+                                    <input 
+                                      type="password" 
+                                      placeholder="Nouveau mdp (optionnel)"
+                                      value={editForm.password}
+                                      onChange={e => setEditForm({ ...editForm, password: e.target.value })}
+                                      className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                    />
+                                  </div>
+                                ) : (
+                                  u.username
+                                )}
+                              </td>
+                              <td className="py-4 px-4">
+                                {editingUserId === u.id ? (
+                                  <select 
+                                    value={editForm.role}
+                                    onChange={e => setEditForm({ ...editForm, role: e.target.value })}
+                                    className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                  >
+                                    <option value="employee">Employee</option>
+                                    <option value="team_lead">Team Lead</option>
+                                    {user?.role === 'admin' && <option value="admin">Admin</option>}
+                                  </select>
+                                ) : (
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                    u.role === 'admin' ? 'bg-red-500/20 text-red-400' :
+                                    u.role === 'team_lead' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    'bg-emerald-500/20 text-emerald-400'
+                                  }`}>
+                                    {u.role}
+                                  </span>
+                                )}
+                              </td>
+                              {user?.role === 'admin' && (
+                                <td className="py-4 px-4 text-right">
+                                  <div className="flex justify-end gap-3">
+                                    {editingUserId === u.id ? (
+                                      <>
+                                        <button onClick={() => handleEditSubmit(u.id)} className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-colors cursor-pointer" title="Enregistrer">
+                                          <Save size={16} />
+                                        </button>
+                                        <button onClick={() => setEditingUserId(null)} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:bg-slate-600 transition-colors cursor-pointer" title="Annuler">
+                                          <X size={16} />
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button 
+                                          onClick={() => {
+                                            setEditingUserId(u.id);
+                                            setEditForm({ username: u.username, role: u.role, password: '' });
+                                          }} 
+                                          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                                        >
+                                          <Edit2 size={16} />
+                                        </button>
+                                        {u.id !== user.id && (
+                                          <button 
+                                            onClick={() => handleDeleteUser(u.id)} 
+                                            className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                                          >
+                                            <Trash2 size={16} />
+                                          </button>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Tools */}
+                <div className="lg:col-span-1 flex flex-col gap-6">
+                  {/* User Creation Form */}
                   <div className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700">
                     <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
                       <UserPlus size={20} className="text-indigo-400" /> Nouvel Utilisateur
@@ -734,153 +836,53 @@ export function Dashboard() {
                     {error && <div className="mb-4 p-3 bg-red-500/10 text-red-400 rounded-lg text-sm border border-red-500/20">{error}</div>}
                     
                     <form onSubmit={handleCreateUser} className="flex flex-col gap-4">
-                      <div className="flex gap-4">
-                        <div className="flex-1">
-                          <label className="block text-sm text-slate-400 mb-1">Nom d'utilisateur</label>
-                          <input 
-                            type="text" 
-                            value={newUsername}
-                            onChange={e => setNewUsername(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" 
-                            required
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <label className="block text-sm text-slate-400 mb-1">Mot de passe</label>
-                          <input 
-                            type="password" 
-                            value={newPassword}
-                            onChange={e => setNewPassword(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500" 
-                            required
-                          />
-                        </div>
+                      <div className="w-full">
+                        <label className="block text-sm text-slate-400 mb-1">Nom d'utilisateur</label>
+                        <input 
+                          type="text" 
+                          autoComplete="off"
+                          value={newUsername}
+                          onChange={e => setNewUsername(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none [&:-webkit-autofill]:[WebkitBoxShadow:0_0_0_30px_#131314_inset] [&:-webkit-autofill]:[-webkit-text-fill-color:white]" 
+                          required
+                        />
                       </div>
-                      <div className="flex gap-4 items-end">
-                        <div className="flex-1">
-                          <label className="block text-sm text-slate-400 mb-1">Rôle</label>
-                          <select 
-                            value={newRole}
-                            onChange={e => setNewRole(e.target.value as any)}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
-                          >
-                            <option value="employee">Employé (Accès restreint)</option>
-                            <option value="team_lead">Team Lead (Gère ses projets/employés)</option>
-                            {user?.role === 'admin' && <option value="admin">Admin (Accès total)</option>}
-                          </select>
-                        </div>
-                        <button type="submit" className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors whitespace-nowrap">
-                          Créer l'utilisateur
-                        </button>
+                      <div className="w-full">
+                        <label className="block text-sm text-slate-400 mb-1">Mot de passe</label>
+                        <input 
+                          type="password" 
+                          autoComplete="new-password"
+                          value={newPassword}
+                          onChange={e => setNewPassword(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none [&:-webkit-autofill]:[WebkitBoxShadow:0_0_0_30px_#131314_inset] [&:-webkit-autofill]:[-webkit-text-fill-color:white]" 
+                          required
+                        />
                       </div>
+                      <div className="w-full">
+                        <label className="block text-sm text-slate-400 mb-1">Rôle</label>
+                        <select 
+                          value={newRole}
+                          onChange={e => setNewRole(e.target.value as any)}
+                          className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        >
+                          <option value="employee">Employé (Accès restreint)</option>
+                          <option value="team_lead">Team Lead (Gère ses projets/employés)</option>
+                          {user?.role === 'admin' && <option value="admin">Admin (Accès total)</option>}
+                        </select>
+                      </div>
+                      <button type="submit" className="w-full px-6 py-2.5 h-[42px] bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors whitespace-nowrap mt-2">
+                        Créer l'utilisateur
+                      </button>
                     </form>
                   </div>
 
-                  <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden">
-                    <table className="w-full text-left">
-                      <thead className="bg-slate-800 border-b border-slate-700">
-                        <tr>
-                          <th className="p-4 font-medium text-slate-400">Utilisateur</th>
-                          <th className="p-4 font-medium text-slate-400">Rôle</th>
-                          {user?.role === 'admin' && <th className="p-4 font-medium text-slate-400 text-right">Actions</th>}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800">
-                        {users.map(u => (
-                          <tr key={u.id} className="hover:bg-slate-800/50">
-                            <td className="p-4">
-                              {editingUserId === u.id ? (
-                                <div className="space-y-2">
-                                  <input 
-                                    type="text" 
-                                    value={editForm.username}
-                                    onChange={e => setEditForm({ ...editForm, username: e.target.value })}
-                                    className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-indigo-500 w-full"
-                                  />
-                                  <input 
-                                    type="password" 
-                                    placeholder="Nouveau mdp (optionnel)"
-                                    value={editForm.password}
-                                    onChange={e => setEditForm({ ...editForm, password: e.target.value })}
-                                    className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-indigo-500 w-full"
-                                  />
-                                </div>
-                              ) : (
-                                u.username
-                              )}
-                            </td>
-                            <td className="p-4">
-                              {editingUserId === u.id ? (
-                                <select 
-                                  value={editForm.role}
-                                  onChange={e => setEditForm({ ...editForm, role: e.target.value })}
-                                  className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-indigo-500 w-full"
-                                >
-                                  <option value="employee">Employee</option>
-                                  <option value="team_lead">Team Lead</option>
-                                  {user?.role === 'admin' && <option value="admin">Admin</option>}
-                                </select>
-                              ) : (
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  u.role === 'admin' ? 'bg-red-500/20 text-red-400' :
-                                  u.role === 'team_lead' ? 'bg-yellow-500/20 text-yellow-400' :
-                                  'bg-emerald-500/20 text-emerald-400'
-                                }`}>
-                                  {u.role}
-                                </span>
-                              )}
-                            </td>
-                            {user?.role === 'admin' && (
-                              <td className="p-4 text-right">
-                                <div className="flex justify-end gap-2">
-                                  {editingUserId === u.id ? (
-                                    <>
-                                      <button onClick={() => handleEditSubmit(u.id)} className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-colors" title="Enregistrer">
-                                        <Save size={16} />
-                                      </button>
-                                      <button onClick={() => setEditingUserId(null)} className="p-2 bg-slate-700 text-slate-300 rounded-lg hover:bg-slate-600 transition-colors" title="Annuler">
-                                        <X size={16} />
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <button 
-                                        onClick={() => {
-                                          setEditingUserId(u.id);
-                                          setEditForm({ username: u.username, role: u.role, password: '' });
-                                        }} 
-                                        className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors"
-                                      >
-                                        <Edit2 size={16} />
-                                      </button>
-                                      {u.id !== user.id && (
-                                        <button 
-                                          onClick={() => handleDeleteUser(u.id)} 
-                                          className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                                        >
-                                          <Trash2 size={16} />
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Project Access Management */}
-                <div>
+                  {/* Project Access Management */}
                   <div className="bg-slate-800/50 rounded-2xl border border-slate-700 overflow-hidden sticky top-0">
-                    <div className="p-4 bg-slate-800 border-b border-slate-700">
-                      <h3 className="font-medium">Accès aux Projets</h3>
-                      <p className="text-sm text-slate-400 mt-1">Sélectionnez un projet pour gérer ses accès.</p>
+                    <div className="p-6 bg-slate-800 border-b border-slate-700">
+                      <h3 className="text-lg font-semibold mb-1">Accès aux Projets</h3>
+                      <p className="text-sm text-slate-400">Sélectionnez un projet pour gérer ses accès.</p>
                       <select 
-                        className="mt-3 w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+                        className="mt-4 w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                         value={selectedProject || ''}
                         onChange={(e) => loadAssignments(e.target.value)}
                       >
@@ -908,7 +910,7 @@ export function Dashboard() {
                                   checked={isAssigned}
                                   onChange={() => toggleAssignment(selectedProject, u.id, isAssigned)}
                                 />
-                                <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                                <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-500 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
                               </label>
                             </div>
                           );
